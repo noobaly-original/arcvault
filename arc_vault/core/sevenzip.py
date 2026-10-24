@@ -116,6 +116,13 @@ class SevenZip:
             cwd=str(cwd) if cwd else None,
             startupinfo=startupinfo,
         )
+
+        try:
+            from arc_vault.logger import log_7zip
+            log_7zip(cmd, res.returncode, res.stdout, res.stderr)
+        except Exception:
+            pass
+
         if check and res.returncode not in (0, 1):
             err = (res.stderr or res.stdout).strip()
             raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {err}")

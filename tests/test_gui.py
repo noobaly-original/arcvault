@@ -2,9 +2,11 @@
 
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Force headless offscreen platform for Qt
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -17,10 +19,12 @@ from arc_vault.core.vault import Vault
 from arc_vault.gui.breadcrumbs import BreadcrumbBar
 from arc_vault.gui.file_view import FileExplorerView
 from arc_vault.gui.icons import IconProvider
+from arc_vault.gui.logs_panel import LogsPanel
 from arc_vault.gui.main_window import MainWindow
 from arc_vault.gui.preview_panel import PreviewPanel
 from arc_vault.gui.sidebar import VaultSidebar
 from arc_vault.gui.theme import DARK_STYLESHEET, LIGHT_STYLESHEET, get_stylesheet
+from arc_vault.logger import clear_log_history, log_7zip, log_info
 
 
 class TestArcVaultGUI(unittest.TestCase):
@@ -37,6 +41,7 @@ class TestArcVaultGUI(unittest.TestCase):
         self.config = AppConfig(config_file=self.root_path / "config.json")
         self.config.known_vaults = []
         self.config.last_selected_vault_path = None
+        clear_log_history()
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
@@ -52,6 +57,37 @@ class TestArcVaultGUI(unittest.TestCase):
             icon = IconProvider.get_category_icon(cat, dark_mode=True, size=24)
             self.assertFalse(icon.isNull())
             self.assertEqual(icon.availableSizes()[0].width(), 24)
+
+    def test_custom_ui_icons(self) -> None:
+        """Verify add_file (incoming), export (outgoing), and logs icons exist and render properly."""
+        for icon_name in ("add_file", "export", "logs"):
+            icon = IconProvider.get_icon(icon_name, dark_mode=True, size=18)
+            self.assertFalse(icon.isNull(), f"Icon {icon_name} should not be null")
+            self.assertEqual(icon.availableSizes()[0].width(), 18)
+
+    def test_logs_panel_and_masking(self) -> None:
+        panel = LogsPanel()
+        self.assertFalse(panel.lbl_title.text() == "")
+
+        # Emit log entries
+        log_info("Application test start event", category="APP")
+        log_7zip(["7zz", "a", "-pSecretVaultPass123", "-mhe=on", "archive.7z"], 0, "Everything is Ok")
+
+        text = panel.text_edit.toPlainText()
+        self.assertIn("Application test start event", text)
+        self.assertIn("7z [OK]", text)
+        self.assertIn("-p***", text)
+        self.assertNotIn("SecretVaultPass123", text)  # Password must be masked!
+
+        # Test filter
+        panel.filter_combo.setCurrentText("7-Zip Only")
+        filtered_text = panel.text_edit.toPlainText()
+        self.assertIn("7z [OK]", filtered_text)
+        self.assertNotIn("Application test start event", filtered_text)
+
+        # Test clear
+        panel._clear_logs()
+        self.assertEqual(panel.text_edit.toPlainText().strip(), "")
 
     def test_preview_panel_views_and_in_app_editing(self) -> None:
         panel = PreviewPanel()
@@ -160,6 +196,14 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertTrue(win.vault.is_unlocked)
         self.assertEqual(win.file_view.table.rowCount(), 2)
 
+        # Toggle logs panel
+        self.assertTrue(win.logs_panel.isHidden())
+        win._toggle_logs_panel()
+        self.assertFalse(win.logs_panel.isHidden())
+        win._toggle_logs_panel()
+        self.assertTrue(win.logs_panel.isHidden())
+
+        # Toggle theme
         win._toggle_theme()
         self.assertFalse(win.dark_mode)
         win._toggle_theme()
@@ -168,6 +212,24 @@ class TestArcVaultGUI(unittest.TestCase):
         win.lock_vault()
         self.assertFalse(win.vault.is_unlocked)
         self.assertEqual(win.file_view.table.rowCount(), 0)
+
+        win.close()
+
+    def test_external_editing_dispatch(self) -> None:
+        """Verify external editing initiates OS editor process without NameError."""
+        win = MainWindow(self.config, auto_unlock_last=False)
+        item = ArchiveItem(name="notes.txt", path="notes.txt", entry_point_name="documents")
+
+        win.vault = MagicMock()
+        win.vault.is_unlocked = True
+        fake_staged = self.root_path / "notes.txt"
+        fake_staged.write_text("hello", encoding="utf-8")
+        win.vault.extract_file_for_editing.return_value = fake_staged
+
+        with patch("arc_vault.gui.main_window.subprocess.Popen") as mock_popen:
+            win._start_external_editing(item)
+            if sys.platform != "win32":
+                mock_popen.assert_called_once()
 
         win.close()
 

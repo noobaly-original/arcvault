@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +34,7 @@ from arc_vault.core.vault import Vault
 from arc_vault.gui.breadcrumbs import BreadcrumbBar
 from arc_vault.gui.file_view import FileExplorerView
 from arc_vault.gui.icons import IconProvider
+from arc_vault.gui.logs_panel import LogsPanel
 from arc_vault.gui.preview_panel import PreviewPanel, format_size
 from arc_vault.gui.sidebar import VaultSidebar
 from arc_vault.gui.theme import get_stylesheet
@@ -104,7 +106,7 @@ class MainWindow(QMainWindow):
         self.sidebar.files_dropped_on_entry_point.connect(self._on_files_dropped_on_entry_point)
         self.main_splitter.addWidget(self.sidebar)
 
-        # 2. Center Explorer (Breadcrumbs + File View)
+        # 2. Center Explorer (Breadcrumbs + File View + Logs Pane)
         self.center_widget = QWidget(self.main_splitter)
         center_layout = QVBoxLayout(self.center_widget)
         center_layout.setContentsMargins(8, 8, 8, 8)
@@ -115,7 +117,10 @@ class MainWindow(QMainWindow):
         self.breadcrumbs.refresh_requested.connect(self.refresh_current_view)
         center_layout.addWidget(self.breadcrumbs)
 
-        self.file_view = FileExplorerView(self.center_widget)
+        self.center_splitter = QSplitter(Qt.Orientation.Vertical, self.center_widget)
+        self.center_splitter.setHandleWidth(4)
+
+        self.file_view = FileExplorerView(self.center_splitter)
         self.file_view.item_selected.connect(self._on_file_selected)
         self.file_view.item_double_clicked.connect(self._on_file_double_clicked)
         self.file_view.files_dropped_on_folder.connect(self._on_files_dropped_on_folder)
@@ -128,7 +133,14 @@ class MainWindow(QMainWindow):
         self.file_view.delete_requested.connect(self._on_delete_action)
         self.file_view.rename_requested.connect(self._on_rename_action)
         self.file_view.edit_external_requested.connect(self._start_external_editing)
-        center_layout.addWidget(self.file_view)
+        self.center_splitter.addWidget(self.file_view)
+
+        self.logs_panel = LogsPanel(self.center_splitter)
+        self.logs_panel.hide()
+        self.center_splitter.addWidget(self.logs_panel)
+        self.center_splitter.setSizes([500, 160])
+
+        center_layout.addWidget(self.center_splitter)
 
         self.main_splitter.addWidget(self.center_widget)
 
@@ -180,6 +192,12 @@ class MainWindow(QMainWindow):
         self.act_lock.triggered.connect(self.lock_vault)
         self.toolbar.addAction(self.act_lock)
 
+        self.act_logs = QAction("Vault Logs", self)
+        self.act_logs.setToolTip("Toggle Vault Activity & 7-Zip Logs (Ctrl+L / Cmd+L)")
+        self.act_logs.setShortcut(QKeySequence("Ctrl+L"))
+        self.act_logs.triggered.connect(self._toggle_logs_panel)
+        self.toolbar.addAction(self.act_logs)
+
         spacer = QWidget(self)
         spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy().Expanding, spacer.sizePolicy().verticalPolicy().Preferred)
         self.toolbar.addWidget(spacer)
@@ -209,11 +227,12 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(qss)
         IconProvider.clear_cache()
 
-        self.act_add_files.setIcon(IconProvider.get_icon("upload", dark_mode=self.dark_mode, size=18))
+        self.act_add_files.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=18))
         self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=18))
-        self.act_export.setIcon(IconProvider.get_icon("download", dark_mode=self.dark_mode, size=18))
+        self.act_export.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=18))
         self.act_delete.setIcon(IconProvider.get_icon("trash", dark_mode=self.dark_mode, size=18))
         self.act_lock.setIcon(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=18))
+        self.act_logs.setIcon(IconProvider.get_icon("logs", dark_mode=self.dark_mode, size=18))
         self.act_theme.setIcon(
             IconProvider.get_icon("sun" if self.dark_mode else "moon", dark_mode=self.dark_mode, size=18)
         )
@@ -223,6 +242,7 @@ class MainWindow(QMainWindow):
         self.breadcrumbs.set_theme(self.dark_mode)
         self.file_view.set_theme(self.dark_mode)
         self.preview_panel.set_theme(self.dark_mode)
+        self.logs_panel.set_theme(self.dark_mode)
 
     def _toggle_theme(self) -> None:
         self.dark_mode = not self.dark_mode
@@ -231,7 +251,17 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def _toggle_preview_panel(self) -> None:
-        self.preview_panel.setVisible(not self.preview_panel.isVisible())
+        if self.preview_panel.isHidden():
+            self.preview_panel.show()
+        else:
+            self.preview_panel.hide()
+
+    def _toggle_logs_panel(self) -> None:
+        if self.logs_panel.isHidden():
+            self.logs_panel.show()
+            self.center_splitter.setSizes([380, 180])
+        else:
+            self.logs_panel.hide()
 
     # --- Vault Operations ---
 

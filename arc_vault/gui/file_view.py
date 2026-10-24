@@ -330,7 +330,7 @@ class FileExplorerView(QWidget):
                 edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
 
             export_act = menu.addAction("Export / Save As...")
-            export_act.setIcon(IconProvider.get_icon("download", dark_mode=self.dark_mode, size=16))
+            export_act.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=16))
             export_act.triggered.connect(lambda: self.export_requested.emit(items))
 
             if len(items) == 1:
@@ -343,7 +343,7 @@ class FileExplorerView(QWidget):
             menu.addSeparator()
 
         add_files_act = menu.addAction("Add Files Here...")
-        add_files_act.setIcon(IconProvider.get_icon("upload", dark_mode=self.dark_mode, size=16))
+        add_files_act.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=16))
         add_files_act.triggered.connect(self.add_files_requested.emit)
 
         new_folder_act = menu.addAction("New Folder...")

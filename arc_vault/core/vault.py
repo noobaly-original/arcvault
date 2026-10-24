@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 from arc_vault.core.models import ArchiveItem, EntryPoint, VaultMetadata, classify_file
 from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
+from arc_vault.logger import log_info, log_warning
 
 
 class VaultUnlockError(Exception):
@@ -122,6 +123,7 @@ class Vault:
                     if not ep_path.exists():
                         sz.create_empty_archive(ep_path, password)
 
+        log_info(f"Created new vault '{name}' at {root_dir}", category="SECURITY")
         vault = cls(root_dir, sz)
         vault.unlock(password)
         return vault
@@ -138,6 +140,7 @@ class Vault:
         check_file = self.root_dir / self.CHECK_FILENAME
         if check_file.exists():
             if not self.sevenzip.test_archive(check_file, password):
+                log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                 return False
         else:
             # 2. Check against any .7z file in root
@@ -148,6 +151,7 @@ class Vault:
             if sevenz_files:
                 first_archive = sevenz_files[0]
                 if not self.sevenzip.test_archive(first_archive, password):
+                    log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                     return False
             else:
                 self.sevenzip.create_empty_archive(check_file, password)
@@ -155,10 +159,13 @@ class Vault:
         self._password = password
         self.is_unlocked = True
         self.refresh_entry_points()
+        vault_title = self.metadata.name if self.metadata else self.root_dir.name
+        log_info(f"Vault unlocked: '{vault_title}' ({len(self.entry_points)} entry points)", category="SECURITY")
         return True
 
     def lock(self) -> None:
         """Lock the vault, clearing cached passwords and temp previews/staging."""
+        vault_title = self.metadata.name if self.metadata else self.root_dir.name
         self._password = None
         self.is_unlocked = False
         self.entry_points.clear()
@@ -175,6 +182,7 @@ class Vault:
             except Exception:
                 pass
             self._edit_staging_dir = None
+        log_info(f"Vault locked: '{vault_title}' (memory keys purged)", category="SECURITY")
 
     @property
     def password(self) -> str:
@@ -215,7 +223,7 @@ class Vault:
         return self.entry_points
 
     def create_entry_point(self, name: str) -> EntryPoint:
-        """Create a new entry point archive in the vault root."""
+        """Create a new top-level encrypted entry point (.7z file)."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -223,18 +231,19 @@ class Vault:
         if not clean_name:
             raise ValueError("Entry point name cannot be empty.")
 
-        archive_file = self.root_dir / f"{clean_name}.7z"
-        if archive_file.exists():
+        ep_file = self.root_dir / f"{clean_name}.7z"
+        if ep_file.exists():
             raise FileExistsError(f"Entry point '{clean_name}' already exists.")
 
-        self.sevenzip.create_empty_archive(archive_file, self.password)
+        self.sevenzip.create_empty_archive(ep_file, self.password)
         ep = EntryPoint(
             name=clean_name,
-            archive_file=archive_file,
-            size_on_disk=archive_file.stat().st_size if archive_file.exists() else 0,
+            archive_file=ep_file,
+            size_on_disk=ep_file.stat().st_size if ep_file.exists() else 0,
         )
         self.entry_points[clean_name] = ep
         self._cache[clean_name] = []
+        log_info(f"Created new entry point '{clean_name}.7z'")
         return ep
 
     def delete_entry_point(self, name: str) -> bool:
@@ -251,6 +260,7 @@ class Vault:
 
         del self.entry_points[name]
         self._cache.pop(name, None)
+        log_info(f"Deleted entry point '{name}.7z'")
         return True
 
     def rename_entry_point(self, old_name: str, new_name: str) -> bool:
@@ -279,6 +289,7 @@ class Vault:
         )
         self.entry_points[clean_new] = ep
         self._cache[clean_new] = cached
+        log_info(f"Renamed entry point '{old_name}' -> '{clean_new}'")
         return True
 
     def get_archive_items(self, entry_point_name: str, force_reload: bool = False) -> List[ArchiveItem]:
@@ -318,15 +329,24 @@ class Vault:
             else:
                 relative = item_path
 
+            if not relative:
+                continue
+
             parts = relative.split("/")
             if len(parts) == 1:
+                # Immediate child
                 results.append(item)
-            elif len(parts) > 1:
+            else:
+                # Intermediate directory
                 immediate_dir = parts[0]
                 if immediate_dir not in seen_dirs:
                     seen_dirs.add(immediate_dir)
-                    if not any(r.name == immediate_dir and r.is_dir for r in results):
-                        full_dir_path = f"{norm_sub}/{immediate_dir}" if norm_sub else immediate_dir
+                    full_dir_path = f"{norm_sub}/{immediate_dir}" if norm_sub else immediate_dir
+                    # Check if there's an explicit folder item for this
+                    existing_folder = next((i for i in all_items if i.path.strip("/") == full_dir_path and i.is_dir), None)
+                    if existing_folder:
+                        results.append(existing_folder)
+                    else:
                         results.append(
                             ArchiveItem(
                                 name=immediate_dir,
@@ -357,6 +377,8 @@ class Vault:
         if ok:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
+            sub_desc = f"/{subfolder}" if subfolder else "root"
+            log_info(f"Added {len(source_paths)} items to '{entry_point_name}' ({sub_desc})")
         return ok
 
     def update_file_from_disk(
@@ -379,6 +401,7 @@ class Vault:
         if ok:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
+            log_info(f"Updated '{internal_path}' in '{entry_point_name}.7z'")
         return ok
 
     def update_file_content(
@@ -413,6 +436,7 @@ class Vault:
         if ok:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
+            log_info(f"Created subfolder '{target_path}' inside '{entry_point_name}.7z'")
         return ok
 
     def delete_item(self, entry_point_name: str, internal_path: str) -> bool:
@@ -425,6 +449,7 @@ class Vault:
         if ok:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
+            log_info(f"Deleted '{internal_path}' from '{entry_point_name}.7z'")
         return ok
 
     def rename_item(self, entry_point_name: str, old_path: str, new_path: str) -> bool:
@@ -437,6 +462,7 @@ class Vault:
         if ok:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
+            log_info(f"Renamed inside '{entry_point_name}.7z': '{old_path}' -> '{new_path}'")
         return ok
 
     def extract_file_for_preview(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
@@ -468,6 +494,9 @@ class Vault:
             raise VaultUnlockError("Vault is locked.")
 
         ep = self.entry_points[entry_point_name]
-        return self.sevenzip.extract_to_destination(
+        ok = self.sevenzip.extract_to_destination(
             ep.archive_file, internal_paths, self.password, dest_dir
         )
+        if ok:
+            log_info(f"Exported {len(internal_paths) if internal_paths else 'all'} items from '{entry_point_name}' to {dest_dir}")
+        return ok
