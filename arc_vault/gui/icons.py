@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from typing import Dict, Optional
-from PyQt6.QtCore import QByteArray, QSize, Qt
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QByteArray, QRectF, QSize, Qt
+from PyQt6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication
 
@@ -197,6 +197,26 @@ class IconProvider:
     _pixmap_cache: Dict[str, QPixmap] = {}
 
     @classmethod
+    def _render_svg_pixmap(cls, renderer: QSvgRenderer, size: int, dpr: float) -> QPixmap:
+        """
+        Render an SVG directly to a QImage of exact physical dimensions (size * dpr),
+        then assign devicePixelRatio(dpr) and convert to QPixmap.
+        This completely avoids painter coordinate double-scaling under high-DPI displays.
+        """
+        phys = max(1, int(round(size * dpr)))
+        img = QImage(phys, phys, QImage.Format.Format_ARGB32_Premultiplied)
+        img.fill(0)
+
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        renderer.render(painter, QRectF(0.0, 0.0, float(phys), float(phys)))
+        painter.end()
+
+        img.setDevicePixelRatio(dpr)
+        return QPixmap.fromImage(img)
+
+    @classmethod
     def get_category_icon(cls, category: FileCategory, dark_mode: bool = True, size: int = 24) -> QIcon:
         """Get icon for a specific file category."""
         key_name = category.value
@@ -244,39 +264,9 @@ class IconProvider:
 
         icon = QIcon()
 
-        # Add requested base size at 1x first so availableSizes()[0].width() matches size
+        # Add 1x, 2x (Retina), and 3x pixmaps for the requested logical size
         for dpr in (1.0, 2.0, 3.0):
-            phys = int(round(size * dpr))
-            pixmap = QPixmap(phys, phys)
-            pixmap.fill(Qt.GlobalColor.transparent)
-            pixmap.setDevicePixelRatio(dpr)
-
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            renderer.render(painter)
-            painter.end()
-
-            icon.addPixmap(pixmap)
-
-        # Also register common UI sizes so scaling across any Qt component remains razor sharp
-        common_sizes = [16, 18, 20, 24, 32, 48, 64, 128]
-        for s in common_sizes:
-            if s == size:
-                continue
-            for dpr in (1.0, 2.0, 3.0):
-                phys = int(round(s * dpr))
-                pixmap = QPixmap(phys, phys)
-                pixmap.fill(Qt.GlobalColor.transparent)
-                pixmap.setDevicePixelRatio(dpr)
-
-                painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-                renderer.render(painter)
-                painter.end()
-
-                icon.addPixmap(pixmap)
+            icon.addPixmap(cls._render_svg_pixmap(renderer, size, dpr))
 
         cls._cache[cache_key] = icon
         return icon
@@ -310,17 +300,7 @@ class IconProvider:
         svg_data = svg_template.format(color=color).encode("utf-8")
         renderer = QSvgRenderer(QByteArray(svg_data))
 
-        phys = int(round(size * dpr))
-        pixmap = QPixmap(phys, phys)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        pixmap.setDevicePixelRatio(dpr)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        renderer.render(painter)
-        painter.end()
-
+        pixmap = cls._render_svg_pixmap(renderer, size, dpr)
         cls._pixmap_cache[cache_key] = pixmap
         return pixmap
 
