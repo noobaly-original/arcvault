@@ -20,8 +20,8 @@ This document describes how to compile **ArcVault** into a standalone, distribut
 Clone the repository and create an isolated virtual environment:
 
 ```bash
-git clone https://github.com/noobaly-original/archive-explorer.git
-cd archive-explorer
+git clone https://github.com/noobaly-original/arcvault.git
+cd arcvault
 
 # Recommended: using uv
 uv venv .venv

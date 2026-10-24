@@ -69,8 +69,8 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 
 ### 2. Installation
 ```bash
-git clone https://github.com/noobaly-original/archive-explorer.git
-cd archive-explorer
+git clone https://github.com/noobaly-original/arcvault.git
+cd arcvault
 
 # Using uv (recommended):
 uv venv .venv
@@ -151,3 +151,10 @@ For detailed build instructions, cross-platform options, and icon assets, see [*
 - **Atomic Operations**: All metadata changes are written to temporary scratch archives and atomically swapped into place (`os.replace`), preventing partial writes and synchronization corruption.
 - **Memory Safety**: Master passwords and encryption keys exist only in process RAM while unlocked, and are completely purged when the vault is locked or the application closes.
 - **Isolated Staging**: Previews and temporary extraction operations run inside permission-restricted directories cleaned up automatically on lock or termination.
+---
+
+## 👥 Contributors & Acknowledgments
+
+- **Kenan ([@noobaly-original](https://github.com/noobaly-original))** — Project Creator & Core Developer
+- **Antigravity (Google DeepMind)** — AI Pair Programmer & System Architect
+
