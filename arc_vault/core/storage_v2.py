@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from arc_vault.core.models import ArchiveItem, FileCategory, classify_file
 from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
@@ -35,6 +35,31 @@ def generate_random_id(length: int = 12) -> str:
     """Generate a random alphanumeric ID (letters and digits only)."""
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def generate_unique_folder_id(
+    parent_dir: Path,
+    length: int = 12,
+    existing_ids: Optional[Union[Set[str], List[str]]] = None,
+    max_attempts: int = 1000,
+) -> str:
+    """
+    Generate a random alphanumeric ID, ensuring no folder or file with that name
+    already exists in parent_dir or within the existing_ids set.
+    Regenerates until a guaranteed unique name is found.
+    """
+    existing_set = set(existing_ids) if existing_ids else set()
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    for _ in range(max_attempts):
+        candidate = generate_random_id(length)
+        if candidate in existing_set:
+            continue
+        if (parent_dir / candidate).exists():
+            continue
+        return candidate
+    raise RuntimeError(
+        f"Failed to find a unique random folder name in {parent_dir} after {max_attempts} attempts."
+    )
 
 
 @dataclass
@@ -132,8 +157,8 @@ class V2StorageEngine:
         password: str,
         arc_data_root: Path,
     ) -> V2EntryPointMetadata:
-        """Create a new V2 metadata archive and its arc-data directory."""
-        ep_dir_id = generate_random_id(12)
+        """Create a new V2 metadata archive and its guaranteed unique arc-data directory."""
+        ep_dir_id = generate_unique_folder_id(arc_data_root, 12)
         ep_data_dir = arc_data_root / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -201,8 +226,13 @@ class V2StorageEngine:
                 log_error(f"Failed to create metadata archive for {archive_path.name}")
                 return False
 
-            # Stage in target directory so os.replace is on the same filesystem (atomic POSIX/NTFS rename)
-            staged_in_target_dir = parent_dir / f".{archive_path.stem}_{generate_random_id(6)}.tmp"
+            # Stage in target directory using a unique non-colliding name
+            while True:
+                cand_staged = parent_dir / f".{archive_path.stem}_{generate_random_id(6)}.tmp"
+                if not cand_staged.exists():
+                    staged_in_target_dir = cand_staged
+                    break
+
             try:
                 shutil.copy2(temp_archive, staged_in_target_dir)
 

@@ -20,6 +20,7 @@ from arc_vault.core.storage_v2 import (
     V2ItemMetadata,
     V2StorageEngine,
     generate_random_id,
+    generate_unique_folder_id,
 )
 from arc_vault.logger import log_info, log_warning
 
@@ -265,7 +266,7 @@ class Vault:
 
         # Legacy V1 archive detected! Auto-migrate into V2
         log_info(f"Migrating legacy entry point '{ep_name}.7z' to V2 chunked architecture...")
-        ep_dir_id = generate_random_id(12)
+        ep_dir_id = generate_unique_folder_id(self.arc_data_dir, 12)
         ep_data_dir = self.arc_data_dir / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -285,7 +286,8 @@ class Vault:
                 for item in legacy_items:
                     if item.name in (METADATA_FILENAME, ".arcvault_init"):
                         continue
-                    item_id = generate_random_id(12)
+                    used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+                    item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
                     clean_path = item.path.strip("/").replace("\\", "/")
 
                     if item.is_dir:
@@ -555,7 +557,8 @@ class Vault:
         target_subfolder: str = "",
     ) -> V2ItemMetadata:
         """Encrypt and record a single file."""
-        item_id = generate_random_id(12)
+        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+        item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         item_dir = ep_data_dir / item_id
         clean_name = source_file.name
         rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
@@ -593,7 +596,8 @@ class Vault:
         rel_dir_path = f"{parent_subfolder}/{dir_name}".strip("/") if parent_subfolder else dir_name
 
         # Create folder item
-        folder_item_id = generate_random_id(12)
+        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+        folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
         mod_time = datetime.fromtimestamp(source_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -622,7 +626,8 @@ class Vault:
         clean_name = new_folder_name.strip()
         target_path = f"{parent_subfolder}/{clean_name}".strip("/") if parent_subfolder else clean_name
 
-        folder_item_id = generate_random_id(12)
+        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+        folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
 
         meta.items[target_path] = V2ItemMetadata(

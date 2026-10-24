@@ -349,5 +349,28 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertIn("hello.txt", recovered_meta.items)
 
 
+    def test_unique_random_folder_generation_collision_avoidance(self) -> None:
+        """Verify generate_unique_folder_id skips existing folders and regenerates unique names."""
+        from arc_vault.core.storage_v2 import generate_unique_folder_id
+
+        test_dir = self.root_path / "collision_test"
+        test_dir.mkdir()
+
+        # Pre-create several subdirectories
+        (test_dir / "colliding1").mkdir()
+        (test_dir / "colliding2").mkdir()
+
+        # Test with existing_ids set
+        uid = generate_unique_folder_id(test_dir, length=8, existing_ids={"colliding1", "colliding2"})
+        self.assertNotIn(uid, {"colliding1", "colliding2"})
+        self.assertFalse((test_dir / uid).exists())
+
+        # Create that folder and generate another
+        (test_dir / uid).mkdir()
+        uid2 = generate_unique_folder_id(test_dir, length=8)
+        self.assertNotEqual(uid, uid2)
+        self.assertFalse((test_dir / uid2).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
