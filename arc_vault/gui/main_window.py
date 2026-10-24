@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, QSize, Qt, QUrl
-from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence
+from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -45,6 +45,7 @@ from arc_vault.gui.workers import (
     ExportFilesWorker,
     ExtractPreviewWorker,
     LoadItemsWorker,
+    SearchWorker,
     UpdateFileWorker,
 )
 
@@ -137,6 +138,12 @@ class MainWindow(QMainWindow):
         self.file_view.edit_external_requested.connect(self._start_external_editing)
         self.file_view.move_requested.connect(self._on_move_action)
         self.file_view.internal_move_requested.connect(self._on_internal_move_requested)
+        self.file_view.search_requested.connect(self._on_search_requested)
+        self.file_view.reveal_requested.connect(self._on_reveal_in_vault)
+
+        self.find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self.find_shortcut.activated.connect(self._focus_search_bar)
+
         self.center_splitter.addWidget(self.file_view)
 
         self.logs_panel = LogsPanel(self.center_splitter)
@@ -466,12 +473,16 @@ class MainWindow(QMainWindow):
 
     def _on_file_double_clicked(self, item: ArchiveItem) -> None:
         if item.category == FileCategory.ENTRY_POINT or (not self.active_entry_point and item.is_dir):
+            self.file_view.search_bar.clear()
             self.active_entry_point = item.entry_point_name or item.name
             self.current_subfolder = ""
             self.sidebar.set_active_entry_point(self.active_entry_point)
             self.refresh_current_view()
         elif item.is_dir:
+            self.file_view.search_bar.clear()
+            self.active_entry_point = item.entry_point_name or self.active_entry_point
             self.current_subfolder = item.path.strip("/")
+            self.sidebar.set_active_entry_point(self.active_entry_point)
             self.refresh_current_view()
         else:
             if item.size > 1024 * 1024 * 1024:
@@ -483,6 +494,73 @@ class MainWindow(QMainWindow):
                 )
                 return
             self._on_file_selected(item)
+
+    def _focus_search_bar(self) -> None:
+        self.file_view.search_bar.setFocus()
+        self.file_view.search_bar.selectAll()
+
+    def _on_search_requested(self, query: str, scope: str) -> None:
+        clean_q = query.strip()
+        if not clean_q or not self.vault or not self.vault.is_unlocked:
+            self.refresh_current_view()
+            return
+
+        target_ep = None
+        target_sub = ""
+        recursive = True
+
+        if scope == "folder":
+            target_ep = self.active_entry_point or None
+            target_sub = self.current_subfolder
+            recursive = False
+        elif scope == "entry_point":
+            target_ep = self.active_entry_point or None
+            target_sub = ""
+            recursive = True
+        else:  # "vault"
+            target_ep = None
+            target_sub = ""
+            recursive = True
+
+        scope_label = "entire vault" if not target_ep else f"{target_ep}.7z (recursive)"
+        if scope == "folder":
+            scope_label = f"/{self.current_subfolder}" if self.current_subfolder else "current folder"
+
+        self.status_bar.showMessage(f"Searching {scope_label} for '{clean_q}'...")
+
+        if hasattr(self, "_search_worker") and self._search_worker and self._search_worker.isRunning():
+            self._search_worker.terminate()
+            self._search_worker.wait()
+
+        self._search_worker = SearchWorker(
+            self.vault, clean_q, entry_point_name=target_ep, subfolder=target_sub, recursive=recursive
+        )
+        self._search_worker.results_found.connect(
+            lambda items, q: self._on_search_results_ready(items, q, scope_label)
+        )
+        self._search_worker.start()
+
+    def _on_search_results_ready(self, items: list, query: str, scope_label: str) -> None:
+        self.file_view.set_search_results(items, query, scope_label)
+        count = len(items)
+        if count == 0:
+            self.status_bar.showMessage(f"No files matching '{query}' found in {scope_label}.")
+        else:
+            self.status_bar.showMessage(f"Found {count} item{'s' if count != 1 else ''} matching '{query}' in {scope_label}.")
+
+    def _on_reveal_in_vault(self, item: ArchiveItem) -> None:
+        self.file_view.search_bar.clear()
+        if item.category == FileCategory.ENTRY_POINT:
+            self.active_entry_point = ""
+            self.current_subfolder = ""
+        else:
+            self.active_entry_point = item.entry_point_name
+            parts = item.path.strip("/").replace("\\", "/").split("/")
+            self.current_subfolder = "/".join(parts[:-1]) if len(parts) > 1 else ""
+
+        self.sidebar.set_active_entry_point(self.active_entry_point)
+        self.refresh_current_view()
+        self.file_view.select_item_by_name(item.name)
 
     # --- Drag & Drop Implementations ---
 

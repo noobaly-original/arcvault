@@ -372,5 +372,67 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertFalse((test_dir / uid2).exists())
 
 
+
+    def test_recursive_search_across_multiple_entry_points(self) -> None:
+        """Verify recursive search across all entry points, subfolders, and wildcard matching."""
+        vault_dir = self.root_path / "search_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Search Vault",
+            password=self.password,
+            initial_entry_points=["photos", "documents"],
+            sevenzip=self.sz,
+        )
+
+        # 1. Add nested files to photos
+        f1 = self.root_path / "beach_vacation.png"
+        f1.write_bytes(b"beach image")
+        vault.add_files("photos", [f1], subfolder="family/summer")
+
+        # 2. Add files to documents
+        f2 = self.root_path / "annual_finance.xlsx"
+        f2.write_bytes(b"spreadsheets")
+        vault.add_files("documents", [f2], subfolder="work/2026")
+
+        f3 = self.root_path / "quick_notes.txt"
+        f3.write_bytes(b"notes text")
+        vault.add_files("documents", [f3], subfolder="")
+
+        # Query A: Search entire vault for "vacation"
+        results_vacation = vault.search_items("vacation")
+        self.assertEqual(len(results_vacation), 1)
+        self.assertEqual(results_vacation[0].name, "beach_vacation.png")
+        self.assertEqual(results_vacation[0].entry_point_name, "photos")
+        self.assertEqual(results_vacation[0].path, "family/summer/beach_vacation.png")
+
+        # Query B: Wildcard search across all entry points for "*.png"
+        results_png = vault.search_items("*.png")
+        self.assertEqual(len(results_png), 1)
+        self.assertEqual(results_png[0].name, "beach_vacation.png")
+
+        # Query C: Wildcard search for "*.xlsx"
+        results_xlsx = vault.search_items("*.xlsx")
+        self.assertEqual(len(results_xlsx), 1)
+        self.assertEqual(results_xlsx[0].name, "annual_finance.xlsx")
+        self.assertEqual(results_xlsx[0].entry_point_name, "documents")
+
+        # Query D: Scoped recursive search inside "documents"
+        results_docs = vault.search_items("finance", entry_point_name="documents")
+        self.assertEqual(len(results_docs), 1)
+        self.assertEqual(results_docs[0].name, "annual_finance.xlsx")
+
+        # Query E: Scoped search inside "photos" should NOT find "finance"
+        results_photos = vault.search_items("finance", entry_point_name="photos")
+        self.assertEqual(len(results_photos), 0)
+
+        # Query F: Subfolder recursive vs non-recursive
+        # Inside "work", recursive should find work/2026/annual_finance.xlsx
+        res_rec = vault.search_items("finance", entry_point_name="documents", subfolder_prefix="work", recursive=True)
+        self.assertEqual(len(res_rec), 1)
+
+        # Non-recursive inside "work" should NOT find annual_finance.xlsx because it is in work/2026/
+        res_non_rec = vault.search_items("finance", entry_point_name="documents", subfolder_prefix="work", recursive=False)
+        self.assertEqual(len(res_non_rec), 0)
+
 if __name__ == "__main__":
     unittest.main()

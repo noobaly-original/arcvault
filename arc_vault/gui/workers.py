@@ -112,37 +112,40 @@ class UpdateFileWorker(QThread):
             self.finished.emit(False, str(e))
 
 
-class UpdateFileWorker(QThread):
-    """Worker thread to update an existing file inside the 7z archive quickly."""
+class SearchWorker(QThread):
+    """Worker thread to perform fast recursive search across vault archives."""
 
-    finished = pyqtSignal(bool, str)
+    results_found = pyqtSignal(list, str)  # (List[ArchiveItem], query)
 
     def __init__(
         self,
         vault: Vault,
-        entry_point_name: str,
-        internal_path: str,
-        content_or_file: Union[str, bytes, Path],
+        query: str,
+        entry_point_name: Optional[str] = None,
+        subfolder: str = "",
+        recursive: bool = True,
     ) -> None:
         super().__init__()
         self.vault = vault
+        self.query = query
         self.entry_point_name = entry_point_name
-        self.internal_path = internal_path
-        self.content_or_file = content_or_file
+        self.subfolder = subfolder
+        self.recursive = recursive
 
     def run(self) -> None:
         try:
-            if isinstance(self.content_or_file, Path):
-                ok = self.vault.update_file_from_disk(
-                    self.entry_point_name, self.internal_path, self.content_or_file
-                )
-            else:
-                ok = self.vault.update_file_content(
-                    self.entry_point_name, self.internal_path, self.content_or_file
-                )
-            self.finished.emit(ok, "" if ok else "Failed to update archive.")
-        except Exception as e:
-            self.finished.emit(False, str(e))
+            if not self.vault or not self.vault.is_unlocked or not self.query.strip():
+                self.results_found.emit([], self.query)
+                return
+            results = self.vault.search_items(
+                query=self.query,
+                entry_point_name=self.entry_point_name,
+                subfolder_prefix=self.subfolder,
+                recursive=self.recursive,
+            )
+            self.results_found.emit(results, self.query)
+        except Exception:
+            self.results_found.emit([], self.query)
 
 
 class ExtractPreviewWorker(QThread):

@@ -1,13 +1,15 @@
-"""Table view component displaying archives, folders, and encrypted files with cross-platform drag-and-drop."""
+"""Table view component displaying archives, folders, and encrypted files with cross-platform drag-and-drop and recursive multi-entry search."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import List, Optional
-from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, QPoint, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
+from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, QPoint, QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
+    QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QMenu,
@@ -50,87 +52,93 @@ class FileTableWidget(QTableWidget):
 
         dist = (event.pos() - self._drag_start_pos).manhattanLength()
         if dist < 10:
-            super().mouseMoveEvent(event)
             return
 
         selected_indexes = self.selectedIndexes()
         if not selected_indexes:
-            super().mouseMoveEvent(event)
             return
 
-        rows = sorted(set(idx.row() for idx in selected_indexes))
+        selected_rows = sorted(set(idx.row() for idx in selected_indexes))
         items: List[ArchiveItem] = []
-        for r in rows:
+        for r in selected_rows:
             it = self.item(r, 0)
             if it:
-                item_data = it.data(Qt.ItemDataRole.UserRole)
-                if isinstance(item_data, ArchiveItem):
-                    items.append(item_data)
+                archive_item = it.data(Qt.ItemDataRole.UserRole)
+                if archive_item:
+                    items.append(archive_item)
 
-        if items:
-            self.drag_export_requested.emit(items)
+        if not items:
+            return
 
-        super().mouseMoveEvent(event)
+        drag = QDrag(self)
+        mime = QMimeData()
+
+        # Custom internal mime type for internal folder reordering
+        import json
+        internal_data = {
+            "source_entry_point": items[0].entry_point_name,
+            "items": [it.path for it in items],
+        }
+        mime.setData("application/x-arcvault-internal", json.dumps(internal_data).encode("utf-8"))
+
+        drag.setMimeData(mime)
+        self.drag_export_requested.emit(items)
+        drag.exec(Qt.DropAction.CopyAction)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        mime = event.mimeData()
-        if mime.hasUrls() or mime.hasFormat("application/x-arcvault-internal"):
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-arcvault-internal"):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        mime = event.mimeData()
-        if mime.hasUrls() or mime.hasFormat("application/x-arcvault-internal"):
-            row = self.rowAt(int(event.position().y()))
-            if 0 <= row < self.rowCount():
-                col0 = self.item(row, 0)
-                if col0:
-                    self.setCurrentItem(col0)
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        row = self.rowAt(pos.y())
+        if row >= 0:
+            self.selectRow(row)
+        else:
+            self.clearSelection()
+
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-arcvault-internal"):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        mime = event.mimeData()
-        row = self.rowAt(int(event.position().y()))
-        target_archive_item: Optional[ArchiveItem] = None
-        if 0 <= row < self.rowCount():
-            col0 = self.item(row, 0)
-            if col0:
-                data = col0.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, ArchiveItem):
-                    target_archive_item = data
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        row = self.rowAt(pos.y())
 
-        if mime.hasFormat("application/x-arcvault-internal"):
+        target_item: Optional[ArchiveItem] = None
+        if row >= 0:
+            item_widget = self.item(row, 0)
+            if item_widget:
+                target_item = item_widget.data(Qt.ItemDataRole.UserRole)
+
+        # 1. Handle Internal Drag & Move
+        if event.mimeData().hasFormat("application/x-arcvault-internal"):
             try:
                 import json
-                raw_bytes = bytes(mime.data("application/x-arcvault-internal"))
-                payload = json.loads(raw_bytes.decode("utf-8"))
-                source_ep = payload.get("entry_point", "")
-                source_paths = payload.get("paths", [])
-                if source_ep and source_paths:
-                    self.internal_move_requested.emit(source_ep, source_paths, target_archive_item)
+                raw_bytes = bytes(event.mimeData().data("application/x-arcvault-internal"))
+                data = json.loads(raw_bytes.decode("utf-8"))
+                source_ep = data.get("source_entry_point", "")
+                item_paths = data.get("items", [])
+                if item_paths:
+                    self.internal_move_requested.emit(source_ep, item_paths, target_item)
                     event.acceptProposedAction()
                     return
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[ArcVault] Failed to process internal drop: {e}")
 
-        urls = mime.urls()
-        file_paths: List[Path] = []
-        for u in urls:
-            local = u.toLocalFile()
-            if local:
-                p = Path(local)
-                if p.exists():
-                    file_paths.append(p)
+        # 2. Handle External Files Drop from OS
+        urls = event.mimeData().urls()
+        if urls:
+            file_paths = [Path(u.toLocalFile()) for u in urls if u.isLocalFile()]
+            if file_paths:
+                self.files_dropped_on_item.emit(file_paths, target_item)
+                event.acceptProposedAction()
+                return
 
-        if not file_paths:
-            event.ignore()
-            return
-
-        self.files_dropped_on_item.emit(file_paths, target_archive_item)
-        event.acceptProposedAction()
+        event.ignore()
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -142,7 +150,7 @@ class FileTableWidget(QTableWidget):
 
 
 class FileExplorerView(QWidget):
-    """File table view with search filter, sorting, and drag-and-drop actions."""
+    """File table view with recursive search, multi-scope filtering, and drag-and-drop actions."""
 
     item_selected = pyqtSignal(object)  # Optional[ArchiveItem]
     item_double_clicked = pyqtSignal(object)  # ArchiveItem
@@ -158,8 +166,12 @@ class FileExplorerView(QWidget):
     edit_external_requested = pyqtSignal(ArchiveItem)
     move_requested = pyqtSignal(list)  # List[ArchiveItem]
     internal_move_requested = pyqtSignal(str, list, object)  # (source_ep, item_paths, target_item)
+    search_requested = pyqtSignal(str, str)  # (query_string, scope) -> scope in ("vault", "entry_point", "folder")
+    reveal_requested = pyqtSignal(ArchiveItem)  # Reveal in enclosing vault folder
 
-    COLUMNS = ["Name", "Size", "Type", "Modified", "Packed"]
+    COLUMNS_NORMAL = ["Name", "Size", "Type", "Modified", "Packed"]
+    COLUMNS_SEARCH = ["Name", "Location", "Size", "Type", "Modified", "Packed"]
+    COLUMNS = COLUMNS_NORMAL
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -168,22 +180,44 @@ class FileExplorerView(QWidget):
         self.displayed_items: List[ArchiveItem] = []
         self.current_entry_point: str = ""
         self.current_subfolder: str = ""
+        self.is_search_mode: bool = False
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(4)
+        self.layout.setSpacing(6)
 
-        # Search bar
+        # Search bar header layout with search input and scope selector
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(6)
+
         self.search_bar = QLineEdit(self)
-        self.search_bar.setPlaceholderText("Filter files in current folder...")
+        self.search_bar.setPlaceholderText("Search files recursively across entire vault or subfolders... (Cmd+F)")
         self.search_bar.setClearButtonEnabled(True)
-        self.search_bar.textChanged.connect(self._filter_items)
-        self.layout.addWidget(self.search_bar)
+        search_layout.addWidget(self.search_bar, stretch=1)
+
+        self.scope_combo = QComboBox(self)
+        self.scope_combo.addItem("🌐 Entire Vault (Recursive)", "vault")
+        self.scope_combo.addItem("📦 Current Archive (Recursive)", "entry_point")
+        self.scope_combo.addItem("📂 Current Folder", "folder")
+        self.scope_combo.setToolTip("Select search scope: entire vault, current archive, or current folder")
+        search_layout.addWidget(self.scope_combo)
+
+        self.layout.addLayout(search_layout)
+
+        # Debounce timer for asynchronous search
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(150)
+        self._search_timer.timeout.connect(self._emit_search_requested)
+
+        self.search_bar.textChanged.connect(self._on_search_text_changed)
+        self.scope_combo.currentIndexChanged.connect(self._on_scope_changed)
 
         # Table
         self.table = FileTableWidget(self)
-        self.table.setColumnCount(len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.setColumnCount(len(self.COLUMNS_NORMAL))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS_NORMAL)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -191,12 +225,7 @@ class FileExplorerView(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Size
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Type
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Modified
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Packed
+        self._configure_table_headers()
 
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         self.table.itemDoubleClicked.connect(self._on_double_clicked)
@@ -210,28 +239,127 @@ class FileExplorerView(QWidget):
 
         self.layout.addWidget(self.table)
 
+    def _configure_table_headers(self) -> None:
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name
+        if self.is_search_mode:
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Location
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Size
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Modified
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Packed
+        else:
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Size
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Type
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Modified
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Packed
+
     def set_location_context(self, entry_point_name: str, subfolder: str = "") -> None:
         self.current_entry_point = entry_point_name
         self.current_subfolder = subfolder.strip("/").replace("\\", "/")
+        self._update_scope_combo_labels()
+
+    def _update_scope_combo_labels(self) -> None:
+        if not hasattr(self, "scope_combo"):
+            return
+
+        self.scope_combo.blockSignals(True)
+        current_data = self.scope_combo.currentData() or "vault"
+        self.scope_combo.clear()
+
+        self.scope_combo.addItem("🌐 Entire Vault (Recursive)", "vault")
+        if self.current_entry_point:
+            self.scope_combo.addItem(f"📦 {self.current_entry_point}.7z (Recursive)", "entry_point")
+            sub_label = f"/{self.current_subfolder}" if self.current_subfolder else "Root"
+            self.scope_combo.addItem(f"📂 Current Folder ({sub_label})", "folder")
+        else:
+            self.scope_combo.addItem("📂 Vault Root Only", "folder")
+
+        idx = self.scope_combo.findData(current_data)
+        if idx >= 0:
+            self.scope_combo.setCurrentIndex(idx)
+        else:
+            self.scope_combo.setCurrentIndex(0)
+        self.scope_combo.blockSignals(False)
 
     def set_theme(self, dark_mode: bool) -> None:
         self.dark_mode = dark_mode
-        self.set_items(self.all_items)
+        self._render_table()
 
     def set_items(self, items: List[ArchiveItem]) -> None:
         self.all_items = items
-        self._filter_items(self.search_bar.text())
+        query = self.search_bar.text().strip()
+        if query:
+            self._on_search_text_changed(query)
+        else:
+            self.is_search_mode = False
+            self.displayed_items = list(items)
+            self._render_table()
+
+    def set_search_results(self, items: List[ArchiveItem], query: str, scope: str) -> None:
+        """Display recursive search results with location column."""
+        self.is_search_mode = bool(query.strip())
+        if self.search_bar.text() != query:
+            self.search_bar.blockSignals(True)
+            self.search_bar.setText(query)
+            self.search_bar.blockSignals(False)
+        self.displayed_items = list(items)
+        self._render_table()
+
+    def _on_search_text_changed(self, text: str) -> None:
+        query = text.strip()
+        if not query:
+            self.is_search_mode = False
+            self.displayed_items = list(self.all_items)
+            self._render_table()
+            self.search_requested.emit("", self.scope_combo.currentData() or "vault")
+            return
+
+        scope = self.scope_combo.currentData() or "vault"
+        # Standalone / non-connected fallback (e.g. unit tests)
+        if scope == "folder" and self.search_requested.receivers(self.search_requested) == 0:
+            self.is_search_mode = False
+            self.displayed_items = [i for i in self.all_items if query.lower() in i.name.lower()]
+            self._render_table()
+        else:
+            self._search_timer.start()
+
+    def _on_scope_changed(self, _index: int) -> None:
+        query = self.search_bar.text().strip()
+        if query:
+            self._emit_search_requested()
+
+    def _emit_search_requested(self) -> None:
+        query = self.search_bar.text().strip()
+        scope = self.scope_combo.currentData() if hasattr(self, "scope_combo") else "vault"
+        self.search_requested.emit(query, scope or "vault")
 
     def _filter_items(self, text: str) -> None:
+        """Compatibility wrapper for direct filtering calls."""
+        self.search_bar.setText(text)
         query = text.strip().lower()
         if query:
             self.displayed_items = [i for i in self.all_items if query in i.name.lower()]
         else:
             self.displayed_items = list(self.all_items)
-
         self._render_table()
 
+    def _format_item_location(self, item: ArchiveItem) -> str:
+        if item.category == FileCategory.ENTRY_POINT:
+            return "Vault Root"
+        ep = f"{item.entry_point_name}.7z" if item.entry_point_name else "Vault Root"
+        parts = item.path.strip("/").replace("\\", "/").split("/")
+        if len(parts) > 1:
+            folder_part = "/".join(parts[:-1])
+            return f"{ep} / {folder_part}"
+        return ep
+
     def _render_table(self) -> None:
+        cols = self.COLUMNS_SEARCH if self.is_search_mode else self.COLUMNS_NORMAL
+        self.table.setColumnCount(len(cols))
+        self.table.setHorizontalHeaderLabels(cols)
+        self._configure_table_headers()
+
         self.table.setRowCount(len(self.displayed_items))
 
         for row, item in enumerate(self.displayed_items):
@@ -241,29 +369,37 @@ class FileExplorerView(QWidget):
             name_item.setIcon(icon)
             name_item.setData(Qt.ItemDataRole.UserRole, item)
 
-            # Column 1: Size
+            col_offset = 0
+            if self.is_search_mode:
+                col_offset = 1
+                loc_str = self._format_item_location(item)
+                loc_item = QTableWidgetItem(loc_str)
+                loc_item.setForeground(QColor("#38bdf8" if self.dark_mode else "#0284c7"))
+                self.table.setItem(row, 1, loc_item)
+
+            # Size
             size_str = "" if item.is_dir else format_size(item.size)
             size_item = QTableWidgetItem(size_str)
             size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            # Column 2: Type
+            # Type
             type_str = self._format_category_name(item.category)
             type_item = QTableWidgetItem(type_str)
 
-            # Column 3: Modified
+            # Modified
             mod_str = item.modified or ""
             mod_item = QTableWidgetItem(mod_str)
 
-            # Column 4: Packed Size
+            # Packed Size
             packed_str = "" if item.is_dir else format_size(item.packed_size)
             packed_item = QTableWidgetItem(packed_str)
             packed_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
             self.table.setItem(row, 0, name_item)
-            self.table.setItem(row, 1, size_item)
-            self.table.setItem(row, 2, type_item)
-            self.table.setItem(row, 3, mod_item)
-            self.table.setItem(row, 4, packed_item)
+            self.table.setItem(row, 1 + col_offset, size_item)
+            self.table.setItem(row, 2 + col_offset, type_item)
+            self.table.setItem(row, 3 + col_offset, mod_item)
+            self.table.setItem(row, 4 + col_offset, packed_item)
 
     def _format_category_name(self, cat: FileCategory) -> str:
         names = {
@@ -283,6 +419,15 @@ class FileExplorerView(QWidget):
             FileCategory.GENERIC: "File",
         }
         return names.get(cat, "File")
+
+    def select_item_by_name(self, name: str) -> None:
+        """Find and select an item row by its name."""
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item and item.text() == name:
+                self.table.selectRow(r)
+                self.table.scrollToItem(item)
+                break
 
     def get_selected_items(self) -> List[ArchiveItem]:
         selected_rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()))
@@ -339,6 +484,13 @@ class FileExplorerView(QWidget):
         if items:
             first = items[0]
             is_over_1gb = (first.size > 1024 * 1024 * 1024)
+
+            if self.is_search_mode:
+                reveal_act = menu.addAction("Reveal in Vault Folder")
+                reveal_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
+                reveal_act.triggered.connect(lambda: self.reveal_requested.emit(first))
+                menu.addSeparator()
+
             if first.is_dir:
                 open_act = menu.addAction("Open Folder")
                 open_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))

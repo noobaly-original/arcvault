@@ -354,5 +354,44 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertEqual(panel.stack.currentIndex(), 1)
         self.assertIn("ArcVault Quickstart Guide", panel.text_edit.toPlainText())
 
+
+    def test_recursive_search_in_gui_and_reveal_flow(self) -> None:
+        """Verify search UI renders Location column, handles results, and reveal navigation."""
+        view = FileExplorerView()
+        self.assertEqual(view.table.columnCount(), 5)  # Normal 5 columns
+
+        # 1. Provide search results from multiple entry points
+        items = [
+            ArchiveItem(name="vacation.png", path="family/vacation.png", entry_point_name="photos", category=FileCategory.IMAGE),
+            ArchiveItem(name="budget.xlsx", path="work/2026/budget.xlsx", entry_point_name="documents", category=FileCategory.DOCUMENT),
+        ]
+        view.set_search_results(items, query="va", scope="vault")
+
+        # In search mode, table should have 6 columns (with Location column at index 1)
+        self.assertTrue(view.is_search_mode)
+        self.assertEqual(view.table.columnCount(), 6)
+        self.assertEqual(view.table.horizontalHeaderItem(1).text(), "Location")
+        self.assertEqual(view.table.rowCount(), 2)
+
+        # Check location display
+        loc_row0 = view.table.item(0, 1).text()
+        self.assertEqual(loc_row0, "photos.7z / family")
+
+        loc_row1 = view.table.item(1, 1).text()
+        self.assertEqual(loc_row1, "documents.7z / work/2026")
+
+        # 2. Test reveal signal
+        revealed_items = []
+        view.reveal_requested.connect(lambda it: revealed_items.append(it))
+        view.reveal_requested.emit(items[0])
+        self.assertEqual(len(revealed_items), 1)
+        self.assertEqual(revealed_items[0].name, "vacation.png")
+
+        # 3. Clear search restores normal mode and 5 columns
+        view.search_bar.clear()
+        self.assertFalse(view.is_search_mode)
+        self.assertEqual(view.table.columnCount(), 5)
+        self.assertEqual(view.table.horizontalHeaderItem(1).text(), "Size")
+
 if __name__ == "__main__":
     unittest.main()

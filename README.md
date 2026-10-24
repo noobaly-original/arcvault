@@ -26,6 +26,13 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - **Cloud Storage Friendly & Atomic Swaps**:
   - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
   - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
+- **Deep Recursive Multi-Archive Search**:
+  - Search across all virtual entry points and nested subfolders simultaneously in milliseconds.
+  - Flexible scope selection: **Entire Vault (Recursive)**, **Current Archive (Recursive)**, or **Current Folder**.
+  - Supports wildcard patterns (`*.png`, `*report*`, `invoice_??.pdf`) and substring text matching.
+  - Dynamic **Location** column indicates archive origin and folder path for every result (`photos.7z / family/summer`).
+  - Right-click **Reveal in Vault Folder** or double-click to immediately jump and select the item inside its native directory tree.
+  - Keyboard shortcut: `Cmd+F` (macOS) or `Ctrl+F` (Windows/Linux) to instantly focus search.
 - **Retina & High-DPI Display Support**:
   - Vector SVG icon engine populates standard and Retina (2x/3x) pixmaps with full antialiasing and smooth transformations, ensuring crisp rendering on MacBooks, Retina screens, and 4K monitors.
 - **Fast & Reliable In-App & External Editing**:

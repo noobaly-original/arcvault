@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shutil
@@ -503,6 +504,87 @@ class Vault:
                     for k in range(1, len(parts)):
                         dirs.add("/".join(parts[:k]))
         return sorted(dirs)
+
+    def search_items(
+        self,
+        query: str,
+        entry_point_name: Optional[str] = None,
+        subfolder_prefix: str = "",
+        recursive: bool = True,
+    ) -> List[ArchiveItem]:
+        """
+        Recursively search for files and folders matching query across multiple entry points and subfolders.
+        - If entry_point_name is provided, search within that entry point.
+          - If subfolder_prefix is provided:
+            - If recursive=True, search within subfolder and all its descendants.
+            - If recursive=False, search only immediate children of subfolder.
+        - If entry_point_name is None or empty, search across ALL entry points in the vault.
+        Matches against item name and internal path using substring and wildcard patterns.
+        """
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        clean_q = query.strip()
+        if not clean_q:
+            return []
+
+        lower_q = clean_q.lower()
+        use_wildcard = "*" in clean_q or "?" in clean_q
+
+        # Determine target entry points
+        if entry_point_name:
+            target_eps = [entry_point_name] if entry_point_name in self.entry_points else []
+        else:
+            target_eps = list(self.entry_points.keys())
+
+        matched_items: List[ArchiveItem] = []
+        norm_sub = subfolder_prefix.strip("/").replace("\\", "/") if subfolder_prefix else ""
+
+        # If searching entire vault at root level, also match entry points themselves
+        if not entry_point_name and not norm_sub:
+            for ep_name, ep in self.entry_points.items():
+                if lower_q in ep_name.lower():
+                    matched_items.append(
+                        ArchiveItem(
+                            name=ep_name,
+                            path=ep_name,
+                            is_dir=True,
+                            size=ep.size_on_disk,
+                            packed_size=ep.size_on_disk,
+                            entry_point_name=ep_name,
+                            category=FileCategory.ENTRY_POINT,
+                        )
+                    )
+
+        for ep_name in target_eps:
+            all_ep_items = self.get_archive_items(ep_name)
+            for it in all_ep_items:
+                it_path = it.path.strip("/").replace("\\", "/")
+                if norm_sub:
+                    if not (it_path == norm_sub or it_path.startswith(norm_sub + "/")):
+                        continue
+                    if not recursive:
+                        rel = it_path[len(norm_sub) + 1:] if it_path.startswith(norm_sub + "/") else ""
+                        if "/" in rel:
+                            continue
+
+                name_lower = it.name.lower()
+                path_lower = it_path.lower()
+
+                matches = False
+                if use_wildcard:
+                    if fnmatch.fnmatch(name_lower, lower_q) or fnmatch.fnmatch(path_lower, lower_q):
+                        matches = True
+                else:
+                    if lower_q in name_lower or lower_q in path_lower:
+                        matches = True
+
+                if matches:
+                    matched_items.append(it)
+
+        # Sort: folders first, then by name
+        matched_items.sort(key=lambda x: (not x.is_dir, x.name.lower()))
+        return matched_items
 
     def add_files(
         self,
