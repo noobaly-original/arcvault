@@ -7,7 +7,7 @@ DARK_STYLESHEET = """
 QMainWindow, QDialog {
     background-color: #0f172a;
     color: #f8fafc;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: system-ui, "SF Pro Text", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
 }
 
@@ -234,7 +234,7 @@ LIGHT_STYLESHEET = """
 QMainWindow, QDialog {
     background-color: #f8fafc;
     color: #0f172a;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: system-ui, "SF Pro Text", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
 }
 
