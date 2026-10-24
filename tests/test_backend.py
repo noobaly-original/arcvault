@@ -474,5 +474,91 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertEqual((target_sub / "doc.txt").read_text(encoding="utf-8"), "root file content")
         self.assertTrue((target_sub / "graphics" / "2026" / "nested.png").is_file())
 
+
+    def test_vault_obfuscation_option_disabled(self) -> None:
+        """Verify vault created with obfuscate_names=False preserves human-readable entry points, folders, and files in arc-data."""
+        vault_dir = self.root_path / "plain_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Plain Vault",
+            password=self.password,
+            initial_entry_points=["documents"],
+            sevenzip=self.sz,
+            obfuscate_names=False,
+        )
+
+        self.assertFalse(vault.obfuscate_names)
+        self.assertFalse(vault.metadata.obfuscate_names)
+
+        # 1. Entry point folder under arc-data should be "documents" (not random 12-char ID)
+        meta = vault._v2_metadata["documents"]
+        self.assertEqual(meta.ep_dir_id, "documents")
+        ep_data_dir = vault.arc_data_dir / "documents"
+        self.assertTrue(ep_data_dir.is_dir())
+
+        # 2. Add root file
+        f1 = self.root_path / "notes.txt"
+        f1.write_text("plain notes", encoding="utf-8")
+        vault.add_files("documents", [f1])
+
+        # File chunk should be under arc-data/documents/notes.txt/chunk_000.7z
+        self.assertEqual(meta.items["notes.txt"].item_id, "notes.txt")
+        self.assertTrue((ep_data_dir / "notes.txt" / "chunk_000.7z").is_file())
+
+        # 3. Create subfolder "work" and add file
+        vault.create_subfolder("documents", "", "work")
+        self.assertTrue((ep_data_dir / "work").is_dir())
+
+        f2 = self.root_path / "report.pdf"
+        f2.write_bytes(b"report bytes")
+        vault.add_files("documents", [f2], subfolder="work")
+
+        meta = vault._v2_metadata["documents"]
+        self.assertEqual(meta.items["work/report.pdf"].item_id, "work/report.pdf")
+        self.assertTrue((ep_data_dir / "work" / "report.pdf" / "chunk_000.7z").is_file())
+
+        # 4. Preview and extraction work correctly
+        preview = vault.extract_file_for_preview("documents", "work/report.pdf")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview.read_bytes(), b"report bytes")
+
+        # 5. Rename item renames folder on disk
+        self.assertTrue(vault.rename_item("documents", "work/report.pdf", "work/final.pdf"))
+        self.assertEqual(meta.items["work/final.pdf"].item_id, "work/final.pdf")
+        self.assertTrue((ep_data_dir / "work" / "final.pdf" / "chunk_000.7z").is_file())
+        self.assertFalse((ep_data_dir / "work" / "report.pdf").exists())
+
+        # 6. Export works
+        dest_dir = self.root_path / "exported_plain"
+        self.assertTrue(vault.export_entry_point("documents", dest_dir))
+        self.assertTrue((dest_dir / "notes.txt").is_file())
+        self.assertEqual((dest_dir / "notes.txt").read_text(encoding="utf-8"), "plain notes")
+        self.assertTrue((dest_dir / "work" / "final.pdf").is_file())
+        self.assertEqual((dest_dir / "work" / "final.pdf").read_bytes(), b"report bytes")
+
+        # 7. Delete item cleans up on disk
+        self.assertTrue(vault.delete_item("documents", "work/final.pdf"))
+        self.assertFalse((ep_data_dir / "work" / "final.pdf").exists())
+
+    def test_vault_obfuscation_option_enabled(self) -> None:
+        """Verify vault created with obfuscate_names=True (default) generates random folder names."""
+        vault_dir = self.root_path / "obf_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Obf Vault",
+            password=self.password,
+            initial_entry_points=["photos"],
+            sevenzip=self.sz,
+            obfuscate_names=True,
+        )
+
+        self.assertTrue(vault.obfuscate_names)
+        self.assertTrue(vault.metadata.obfuscate_names)
+
+        meta = vault._v2_metadata["photos"]
+        self.assertNotEqual(meta.ep_dir_id, "photos")
+        self.assertEqual(len(meta.ep_dir_id), 12)
+        self.assertTrue((vault.arc_data_dir / meta.ep_dir_id).is_dir())
+
 if __name__ == "__main__":
     unittest.main()

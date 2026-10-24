@@ -95,6 +95,7 @@ class Vault:
                     version=data.get("version", "2.0"),
                     created_at=data.get("created_at", ""),
                     encryption=data.get("encryption", "AES-256"),
+                    obfuscate_names=bool(data.get("obfuscate_names", True)),
                 )
                 return
             except Exception:
@@ -104,7 +105,14 @@ class Vault:
             name=self.root_dir.name,
             vault_id=str(uuid.uuid4()),
             created_at=datetime.now(timezone.utc).isoformat(),
+            obfuscate_names=True,
         )
+
+    @property
+    def obfuscate_names(self) -> bool:
+        if self.metadata:
+            return self.metadata.obfuscate_names
+        return True
 
     @classmethod
     def create_vault(
@@ -115,6 +123,7 @@ class Vault:
         initial_entry_points: Optional[List[str]] = None,
         sevenzip: Optional[SevenZip] = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
+        obfuscate_names: bool = True,
     ) -> Vault:
         """Create a new vault directory with marker, verification check, and arc-data folder."""
         sz = sevenzip or SevenZip()
@@ -132,6 +141,7 @@ class Vault:
             "encryption": "AES-256",
             "check_archive": cls.CHECK_FILENAME,
             "storage_mode": "v2_chunked_arc_data",
+            "obfuscate_names": obfuscate_names,
         }
         marker_file = root_dir / cls.MARKER_FILENAME
         marker_file.write_text(json.dumps(metadata_dict, indent=2), encoding="utf-8")
@@ -151,7 +161,7 @@ class Vault:
                 if clean_name:
                     vault.create_entry_point(clean_name)
 
-        log_info(f"Created new vault '{name}' at {root_dir}", category="SECURITY")
+        log_info(f"Created new vault '{name}' at {root_dir} (obfuscate_names={obfuscate_names})", category="SECURITY")
         return vault
 
     def unlock(self, password: str) -> bool:
@@ -267,7 +277,10 @@ class Vault:
 
         # Legacy V1 archive detected! Auto-migrate into V2
         log_info(f"Migrating legacy entry point '{ep_name}.7z' to V2 chunked architecture...")
-        ep_dir_id = generate_unique_folder_id(self.arc_data_dir, 12)
+        if self.obfuscate_names:
+            ep_dir_id = generate_unique_folder_id(self.arc_data_dir, 12)
+        else:
+            ep_dir_id = ep_name
         ep_data_dir = self.arc_data_dir / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -287,9 +300,12 @@ class Vault:
                 for item in legacy_items:
                     if item.name in (METADATA_FILENAME, ".arcvault_init"):
                         continue
-                    used_ids = {it.item_id for it in meta.items.values() if it.item_id}
-                    item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
                     clean_path = item.path.strip("/").replace("\\", "/")
+                    if self.obfuscate_names:
+                        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+                        item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+                    else:
+                        item_id = clean_path
 
                     if item.is_dir:
                         meta.items[clean_path] = V2ItemMetadata(
@@ -342,7 +358,7 @@ class Vault:
             raise FileExistsError(f"Entry point '{clean_name}' already exists.")
 
         meta = self.v2_engine.create_entry_point_archive(
-            ep_file, clean_name, self.password, self.arc_data_dir
+            ep_file, clean_name, self.password, self.arc_data_dir, obfuscate_names=self.obfuscate_names
         )
         self._v2_metadata[clean_name] = meta
         self._cache[clean_name] = []
@@ -402,6 +418,12 @@ class Vault:
 
         if meta:
             meta.entry_point_name = clean_new
+            if not self.obfuscate_names:
+                old_ep_dir = self.arc_data_dir / meta.ep_dir_id
+                new_ep_dir = self.arc_data_dir / clean_new
+                if old_ep_dir.exists():
+                    old_ep_dir.rename(new_ep_dir)
+                meta.ep_dir_id = clean_new
             self.v2_engine.save_metadata(new_file, meta, self.password)
             self._v2_metadata[clean_new] = meta
 
@@ -639,11 +661,18 @@ class Vault:
         target_subfolder: str = "",
     ) -> V2ItemMetadata:
         """Encrypt and record a single file."""
-        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
-        item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
-        item_dir = ep_data_dir / item_id
         clean_name = source_file.name
         rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
+
+        if self.obfuscate_names:
+            used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+            item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+        else:
+            item_id = rel_path
+
+        item_dir = ep_data_dir / item_id
+        if not self.obfuscate_names and item_dir.exists():
+            shutil.rmtree(item_dir, ignore_errors=True)
 
         size, packed, chunks = self.v2_engine.chunk_and_encrypt_file(
             source_file, item_dir, self.password
@@ -678,8 +707,12 @@ class Vault:
         rel_dir_path = f"{parent_subfolder}/{dir_name}".strip("/") if parent_subfolder else dir_name
 
         # Create folder item
-        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
-        folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+        if self.obfuscate_names:
+            used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+            folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+        else:
+            folder_item_id = rel_dir_path
+
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
         mod_time = datetime.fromtimestamp(source_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -708,8 +741,12 @@ class Vault:
         clean_name = new_folder_name.strip()
         target_path = f"{parent_subfolder}/{clean_name}".strip("/") if parent_subfolder else clean_name
 
-        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
-        folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+        if self.obfuscate_names:
+            used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+            folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+        else:
+            folder_item_id = target_path
+
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
 
         meta.items[target_path] = V2ItemMetadata(
@@ -753,6 +790,15 @@ class Vault:
                 if item_dir.exists():
                     shutil.rmtree(item_dir, ignore_errors=True)
 
+        if not self.obfuscate_names:
+            parent = (ep_data_dir / clean_path).parent
+            while parent != ep_data_dir and parent.exists():
+                try:
+                    parent.rmdir()
+                    parent = parent.parent
+                except OSError:
+                    break
+
         ep_file = self.entry_points[entry_point_name].archive_file
         self.v2_engine.save_metadata(ep_file, meta, self.password)
         self._cache.pop(entry_point_name, None)
@@ -766,6 +812,7 @@ class Vault:
             raise VaultUnlockError("Vault is locked.")
 
         meta = self._v2_metadata[entry_point_name]
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         clean_old = old_path.strip("/").replace("\\", "/")
         clean_new = new_path.strip("/").replace("\\", "/")
 
@@ -778,14 +825,25 @@ class Vault:
         if not affected_items:
             return False
 
+        if not self.obfuscate_names:
+            old_disk_dir = ep_data_dir / clean_old
+            new_disk_dir = ep_data_dir / clean_new
+            if old_disk_dir.exists():
+                new_disk_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old_disk_dir), str(new_disk_dir))
+
         for p, item in affected_items:
             del meta.items[p]
             if p == clean_old:
                 item.path = clean_new
                 item.name = clean_new.split("/")[-1]
+                if not self.obfuscate_names:
+                    item.item_id = clean_new
             else:
                 rel = p[len(clean_old) + 1:]
                 item.path = f"{clean_new}/{rel}"
+                if not self.obfuscate_names:
+                    item.item_id = item.path
             meta.items[item.path] = item
 
         ep_file = self.entry_points[entry_point_name].archive_file

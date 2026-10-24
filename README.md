@@ -14,6 +14,8 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 
 ## ✨ Features
 
+- **Configurable Name Obfuscation**:
+  - Choose during vault creation whether folder and file names in `arc-data/` are disguised with random alphanumeric IDs (default, maximum privacy) or kept as plain human-readable names on disk for users who prefer directly readable encrypted folder trees.
 - **Blazing Fast Store-Mode Encryption**: Bypasses CPU-heavy compression (`-mx=0`) while enforcing maximum AES-256 header and data encryption (`-mhe=on`), achieving native SSD throughput (500+ MB/s).
 - **Decoupled Virtual Entry Points & `arc-data/`**:
   - Top-level archives (`photos.7z`, `documents.7z`) act as **virtual folders** holding lightweight AES-256 encrypted metadata.
@@ -101,8 +103,8 @@ MyVault/
 ├── photos.7z                       # Virtual Entry Point: Encrypted metadata.json
 ├── documents.7z                    # Virtual Entry Point: Encrypted metadata.json
 └── arc-data/                       # Store-mode AES-256 encrypted payload
-    ├── K9mB3vXp8Q1L/              # Entry point data directory (random alphanumeric ID)
-    │   ├── a1b2c3d4e5f6/          # Item folder for "vacation.jpg" (<= 1 GB)
+    ├── K9mB3vXp8Q1L/              # Entry point data directory (random ID when obfuscated, or "photos" if plain)
+    │   ├── a1b2c3d4e5f6/          # Item folder for "vacation.jpg" (random ID when obfuscated, or "vacation.jpg" if plain)
     │   │   └── chunk_000.7z       # AES-256 store-mode chunk (-mx=0, -mhe=on)
     │   └── 9z8y7x6w5v4u/          # Item folder for "drone_4k.mp4" (> 1 GB)
     │       ├── chunk_000.7z       # 1 GB encrypted chunk
@@ -110,6 +112,10 @@ MyVault/
     │       └── chunk_002.7z       # Remainder encrypted chunk
     └── Z7y4W1v2U9t0/              # Entry point data directory for 'documents'
 ```
+
+> **Note on Name Obfuscation**: When creating a vault, you can toggle **Obfuscate folder & file names in arc-data**.
+> - **Enabled (Default)**: Folders in `arc-data/` use random 12-character alphanumeric IDs (`K9mB3vXp8Q1L`), preventing anyone inspecting the raw storage from discovering your folder or file names.
+> - **Disabled**: Entry points and item folders in `arc-data/` retain their exact human-readable names (`photos/vacation.jpg/chunk_000.7z`), allowing you to easily browse the folder structure on disk while keeping all contents strictly AES-256 encrypted.
 
 - When viewing `photos` inside ArcVault, the application projects the virtual items seamlessly as single unified files and directories.
 - `metadata.json` is automatically hidden from the user view.

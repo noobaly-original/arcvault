@@ -611,5 +611,16 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertTrue(exported_file.is_file())
         self.assertEqual(exported_file.read_text(encoding="utf-8"), "hello export worker")
 
+
+    def test_create_vault_dialog_obfuscation_option(self) -> None:
+        """Verify CreateVaultDialog has obfuscation checkbox defaulting to checked."""
+        from arc_vault.gui.vault_dialog import CreateVaultDialog
+
+        dlg = CreateVaultDialog(dark_mode=True)
+        self.assertTrue(hasattr(dlg, "chk_obfuscate"))
+        self.assertTrue(dlg.chk_obfuscate.isChecked())
+        self.assertEqual(dlg.chk_obfuscate.text(), "Obfuscate folder & file names in arc-data")
+        dlg.close()
+
 if __name__ == "__main__":
     unittest.main()

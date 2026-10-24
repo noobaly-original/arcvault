@@ -69,7 +69,7 @@ class V2ItemMetadata:
     path: str              # Internal path, e.g. "family/photo.png" or "family"
     name: str              # e.g. "photo.png"
     is_dir: bool = False
-    item_id: str = ""      # Random alphanumeric directory name in arc-data/{ep_dir_id}/{item_id}
+    item_id: str = ""      # Random alphanumeric directory name in arc-data/{ep_dir_id}/{item_id} or human path
     size: int = 0          # Total uncompressed size
     packed_size: int = 0   # Total encrypted size on disk
     modified: str = ""
@@ -156,9 +156,13 @@ class V2StorageEngine:
         entry_point_name: str,
         password: str,
         arc_data_root: Path,
+        obfuscate_names: bool = True,
     ) -> V2EntryPointMetadata:
-        """Create a new V2 metadata archive and its guaranteed unique arc-data directory."""
-        ep_dir_id = generate_unique_folder_id(arc_data_root, 12)
+        """Create a new V2 metadata archive and its arc-data directory."""
+        if obfuscate_names:
+            ep_dir_id = generate_unique_folder_id(arc_data_root, 12)
+        else:
+            ep_dir_id = entry_point_name
         ep_data_dir = arc_data_root / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 

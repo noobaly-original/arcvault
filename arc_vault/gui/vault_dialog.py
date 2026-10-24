@@ -163,7 +163,7 @@ class CreateVaultDialog(QDialog):
         self.created_vault_name: str = ""
 
         self.setWindowTitle("Create New Vault")
-        self.setFixedSize(500, 420)
+        self.setFixedSize(500, 485)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
@@ -241,6 +241,22 @@ class CreateVaultDialog(QDialog):
         categories_layout.addWidget(self.chk_personal)
         layout.addLayout(categories_layout)
 
+        # Obfuscation Option
+        self.chk_obfuscate = QCheckBox("Obfuscate folder & file names in arc-data", self)
+        self.chk_obfuscate.setChecked(True)
+        self.chk_obfuscate.setStyleSheet("font-size: 12px; font-weight: 500; margin-top: 6px;")
+        self.chk_obfuscate.setToolTip(
+            "When enabled (recommended), directory and file names inside arc-data/ are disguised with random IDs.\n"
+            "When disabled, plain human-readable names are preserved on disk."
+        )
+        layout.addWidget(self.chk_obfuscate)
+
+        lbl_obf_hint = QLabel(
+            "Disguises directory and item names in arc-data/ with random IDs for extra privacy.", self
+        )
+        lbl_obf_hint.setStyleSheet("color: #64748b; font-size: 11px; margin-left: 20px; margin-bottom: 4px;")
+        layout.addWidget(lbl_obf_hint)
+
         # Error banner
         self.lbl_error = QLabel("", self)
         self.lbl_error.setStyleSheet("color: #ef4444; font-size: 12px;")
@@ -302,12 +318,15 @@ class CreateVaultDialog(QDialog):
         if self.chk_personal.isChecked():
             initial_eps.append("personal")
 
+        obfuscate_names = self.chk_obfuscate.isChecked()
+
         try:
             vault = Vault.create_vault(
                 root_dir=loc_path,
                 name=name,
                 password=pwd,
                 initial_entry_points=initial_eps,
+                obfuscate_names=obfuscate_names,
             )
             self.created_vault_path = loc_path
             self.created_vault_name = name

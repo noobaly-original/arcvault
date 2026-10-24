@@ -68,6 +68,7 @@ class VaultMetadata:
     version: str = "1.0"
     created_at: str = ""
     encryption: str = "AES-256"
+    obfuscate_names: bool = True
 
 
 def classify_file(name: str, is_dir: bool = False) -> FileCategory:
