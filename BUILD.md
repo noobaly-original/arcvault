@@ -6,16 +6,18 @@ This document describes how to compile **ArcVault** into portable **"onefile" st
 
 ## ⚡ Quick Start: 1-Click Platform Build Scripts
 
-ArcVault includes automated build scripts located in the root directory (and mirrored in `scripts/`) that set up dependencies, compile portable standalone binaries, configure Retina icons, and sign binaries:
+ArcVault includes self-sufficient build scripts in the root directory (and mirrored in `scripts/`). Each script automatically creates a `.venv` virtual environment if missing, upgrades pip, installs all dependencies from `requirements.txt`, synchronizes icons, and builds the distribution:
 
 ### 🍎 macOS (Apple Silicon & Intel)
 ```bash
 chmod +x build_mac.sh
 ./build_mac.sh
 ```
-- Produces:
-  - `dist/ArcVault` — Standalone portable onefile binary (can be run directly or copied anywhere).
-  - `dist/ArcVault.app` — Native macOS Application Bundle.
+- **Automatically**:
+  - Initializes `.venv` and installs `requirements.txt`.
+  - Regenerates `ArcVault.icns` and `ArcVault.ico` if `icon.png` is updated.
+  - Builds `dist/ArcVault` (portable standalone binary) and `dist/ArcVault.app` (macOS Application Bundle).
+  - Signs with ad-hoc certificates for macOS Gatekeeper.
 
 ### 🪟 Windows (x64)
 In Command Prompt (`cmd.exe`):
@@ -26,8 +28,10 @@ Or in PowerShell:
 ```powershell
 .\build_windows.ps1
 ```
-- Produces:
-  - `dist\ArcVault.exe` — Standalone portable onefile Windows executable.
+- **Automatically**:
+  - Initializes `.venv` and installs `requirements.txt`.
+  - Synchronizes multi-resolution `ArcVault.ico` (16x16 to 256x256).
+  - Builds `dist\ArcVault.exe` with embedded icon resources.
 - **USB / Portable Tip**: You can carry `ArcVault.exe` on a USB drive. If 7-Zip is not installed on the host machine, simply drop `7z.exe` and `7z.dll` next to `ArcVault.exe`.
 
 ### 🐧 Linux (x86_64 & aarch64)
@@ -35,8 +39,9 @@ Or in PowerShell:
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
-- Produces:
-  - `dist/ArcVault` — Standalone portable onefile ELF binary.
+- **Automatically**:
+  - Initializes `.venv` and installs `requirements.txt`.
+  - Builds `dist/ArcVault` (portable standalone ELF binary).
 
 ---
 
@@ -47,7 +52,6 @@ chmod +x build_linux.sh
    - **macOS**: `brew install sevenzip` (`7zz` binary)
    - **Linux**: `sudo apt install p7zip-full` (`7z` binary)
    - **Windows**: Install [7-Zip](https://www.7-zip.org/) or [NanaZip](https://github.com/M2Team/NanaZip)
-3. **Virtual Environment Tools**: `uv` (recommended) or standard `pip` / `venv`.
 
 ---
 
@@ -59,17 +63,10 @@ chmod +x build_linux.sh
 git clone https://github.com/noobaly-original/arcvault.git
 cd arcvault
 
-# Using uv (fast):
-uv venv .venv
-source .venv/bin/activate    # On Windows: .venv\Scripts\activate
-uv pip install -r requirements.txt
-uv pip install pyinstaller
-
-# Or using standard python:
+# Setup virtual environment and dependencies:
 python3 -m venv .venv
 source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-pip install pyinstaller
 ```
 
 ---
@@ -95,10 +92,9 @@ pyinstaller arcvault.spec --noconfirm --clean
 
 ---
 
-## 🎨 macOS Icon Generation (Reference)
+## 🎨 Icon Generation (Reference)
 
-If you modify `arc_vault/resources/icon.png` and wish to regenerate `ArcVault.icns`:
-
+### macOS (.icns):
 ```bash
 mkdir -p /tmp/ArcVault.iconset
 sips -z 16 16     arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_16x16.png
@@ -113,6 +109,11 @@ sips -z 512 512   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_
 sips -z 1024 1024 arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_512x512@2x.png
 iconutil -c icns /tmp/ArcVault.iconset -o arc_vault/resources/ArcVault.icns
 rm -rf /tmp/ArcVault.iconset
+```
+
+### Windows (.ico):
+```bash
+python -c "from PIL import Image; Image.open('arc_vault/resources/icon.png').save('arc_vault/resources/ArcVault.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 ```
 
 ---

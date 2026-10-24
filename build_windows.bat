@@ -2,6 +2,7 @@
 rem ==============================================================================
 rem ArcVault - Windows Build Script (Batch)
 rem Builds a portable "onefile" standalone executable (ArcVault.exe).
+rem Automatically sets up .venv and installs requirements.txt.
 rem ==============================================================================
 
 setlocal enabledelayedexpansion
@@ -11,47 +12,76 @@ echo ==========================================================
 echo          ArcVault - Windows Build ^& Packaging
 echo ==========================================================
 
-rem 1. Locate Python executable
-set "PYTHON_CMD="
-if exist ".venv\Scripts\python.exe" (
-    set "PYTHON_CMD=.venv\Scripts\python.exe"
-    goto :FoundPython
+rem 1. Locate host Python or uv
+set "HOST_PYTHON="
+where uv >nul 2>nul
+if %ERRORLEVEL% equ 0 (
+    set "HAS_UV=1"
+) else (
+    set "HAS_UV=0"
 )
 
 where py >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    set "PYTHON_CMD=py -3"
-    goto :FoundPython
+    set "HOST_PYTHON=py -3"
+    goto :FoundHost
 )
 
 where python >nul 2>nul
 if %ERRORLEVEL% equ 0 (
-    set "PYTHON_CMD=python"
-    goto :FoundPython
+    set "HOST_PYTHON=python"
+    goto :FoundHost
 )
 
-echo [-] Error: Python was not found in PATH or .venv.
+if exist ".venv\Scripts\python.exe" (
+    set "HOST_PYTHON=.venv\Scripts\python.exe"
+    goto :FoundHost
+)
+
+echo [-] Error: Python was not found in PATH or system.
 echo     Please install Python 3.9+ from https://www.python.org/
 exit /b 1
 
-:FoundPython
-echo [+] Using Python command: %PYTHON_CMD%
-%PYTHON_CMD% --version
-
-rem 2. Ensure PyInstaller is installed
-%PYTHON_CMD% -c "import PyInstaller" >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    echo [*] Installing PyInstaller...
-    %PYTHON_CMD% -m pip install --quiet pyinstaller
+:FoundHost
+rem 2. Setup / Use Virtual Environment
+if not exist ".venv" (
+    echo [*] Virtual environment not found. Creating .venv...
+    if "%HAS_UV%"=="1" (
+        uv venv .venv
+    ) else (
+        %HOST_PYTHON% -m venv .venv
+    )
 )
 
-rem 3. Clean prior build files
+set "PYTHON_CMD=.venv\Scripts\python.exe"
+if not exist "%PYTHON_CMD%" (
+    set "PYTHON_CMD=%HOST_PYTHON%"
+)
+
+echo [+] Using Python: %PYTHON_CMD%
+%PYTHON_CMD% --version
+
+rem 3. Always install / sync dependencies from requirements.txt
+echo [*] Installing dependencies from requirements.txt...
+if "%HAS_UV%"=="1" (
+    uv pip install -r requirements.txt --python "%PYTHON_CMD%" --quiet
+) else (
+    %PYTHON_CMD% -m pip --version >nul 2>nul || %PYTHON_CMD% -m ensurepip --upgrade >nul 2>nul
+    %PYTHON_CMD% -m pip install --quiet -r requirements.txt
+)
+
+rem 4. Ensure Windows .ico icon is up to date
+if exist "arc_vault\resources\icon.png" (
+    %PYTHON_CMD% -c "from PIL import Image; from pathlib import Path; p = Path('arc_vault/resources/icon.png'); i = Path('arc_vault/resources/ArcVault.ico'); (not i.exists() or p.stat().st_mtime > i.stat().st_mtime) and Image.open(p).save(i, format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>nul
+)
+
+rem 5. Clean prior build files
 echo [*] Cleaning build directory...
 if exist "build\arcvault" rmdir /s /q "build\arcvault"
 if exist "build\arcvault_onefile" rmdir /s /q "build\arcvault_onefile"
 
-rem 4. Build Portable Standalone Onefile Executable
-echo [*] Compiling portable standalone Windows executable (onefile)...
+rem 6. Build Portable Standalone Onefile Executable with .ico embedding
+echo [*] Compiling portable standalone Windows executable with ArcVault.ico...
 %PYTHON_CMD% -m PyInstaller arcvault_onefile.spec --noconfirm --clean
 
 if %ERRORLEVEL% neq 0 (
@@ -59,7 +89,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b %ERRORLEVEL%
 )
 
-rem 5. Report result
+rem 7. Report result
 echo.
 echo ==========================================================
 echo                   Build Successful!

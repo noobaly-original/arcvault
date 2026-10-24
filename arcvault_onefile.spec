@@ -7,7 +7,12 @@ from pathlib import Path
 block_cipher = None
 project_root = Path(os.path.abspath(".")).resolve()
 
-icon_file = "arc_vault/resources/ArcVault.icns" if sys.platform == "darwin" else "arc_vault/resources/icon.png"
+if sys.platform == "darwin":
+    icon_file = "arc_vault/resources/ArcVault.icns"
+elif sys.platform == "win32":
+    icon_file = "arc_vault/resources/ArcVault.ico"
+else:
+    icon_file = "arc_vault/resources/icon.png"
 
 a = Analysis(
     ["run.py"],
