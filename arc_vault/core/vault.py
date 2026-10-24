@@ -51,11 +51,33 @@ class Vault:
         """Check if directory is an existing ArcVault root."""
         if not directory.exists() or not directory.is_dir():
             return False
-        return (
-            (directory / cls.MARKER_FILENAME).exists()
-            or (directory / cls.CHECK_FILENAME).exists()
-            or (directory / ".arcvault_vault").exists()
-        )
+
+        # 1. Fast verification check archive
+        if (directory / cls.CHECK_FILENAME).is_file():
+            return True
+
+        # 2. Primary metadata marker file (.arcvault)
+        # Note: Must be a regular file, NOT a directory (e.g. ~/.arcvault config dir)
+        marker = directory / cls.MARKER_FILENAME
+        if marker.is_file():
+            try:
+                data = json.loads(marker.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and ("vault_id" in data or "storage_mode" in data or "version" in data):
+                    return True
+            except Exception:
+                pass
+
+        # 3. Alternate metadata marker file (.arcvault_vault)
+        alt = directory / ".arcvault_vault"
+        if alt.is_file():
+            try:
+                data = json.loads(alt.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and ("vault_id" in data or "storage_mode" in data or "version" in data):
+                    return True
+            except Exception:
+                pass
+
+        return False
 
     @classmethod
     def find_enclosing_vault(cls, target_path: Path) -> Optional[Path]:
@@ -117,12 +139,12 @@ class Vault:
     def _read_metadata(self) -> None:
         """Read .arcvault metadata if it exists."""
         marker = self.root_dir / self.MARKER_FILENAME
-        if not marker.exists():
+        if not marker.is_file():
             alt_marker = self.root_dir / ".arcvault_vault"
-            if alt_marker.exists():
+            if alt_marker.is_file():
                 marker = alt_marker
 
-        if marker.exists():
+        if marker.is_file():
             try:
                 data = json.loads(marker.read_text(encoding="utf-8"))
                 self.metadata = VaultMetadata(
@@ -221,7 +243,7 @@ class Vault:
 
         # 1. Try checking against check archive
         check_file = self.root_dir / self.CHECK_FILENAME
-        if check_file.exists():
+        if check_file.is_file():
             if not self.sevenzip.test_archive(check_file, password):
                 log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                 return False

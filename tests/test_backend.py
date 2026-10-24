@@ -607,5 +607,30 @@ class TestArcVaultBackend(unittest.TestCase):
             )
         self.assertIn("located inside an existing vault folder", str(ctx3.exception))
 
+    def test_home_config_directory_not_mistaken_for_vault(self) -> None:
+        """Verify a directory with a .arcvault subdirectory (like ~/.arcvault) is not mistaken for a vault."""
+        mock_home = self.root_path / "mock_user_home"
+        mock_home.mkdir(parents=True, exist_ok=True)
+        # Simulate ~/.arcvault configuration folder
+        cfg_dir = mock_home / ".arcvault"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.json").write_text('{"theme": "dark"}', encoding="utf-8")
+
+        # mock_home must NOT be detected as a vault
+        self.assertFalse(Vault.is_vault_dir(mock_home))
+        self.assertIsNone(Vault.find_enclosing_vault(mock_home / "Documents" / "FirstVault"))
+
+        # Creating a vault inside mock_home (e.g. ~/Documents/FirstVault) must succeed
+        new_vault_path = mock_home / "Documents" / "FirstVault"
+        vault = Vault.create_vault(
+            new_vault_path,
+            name="FirstVault",
+            password=self.password,
+            sevenzip=self.sz,
+        )
+        self.assertTrue(vault.is_unlocked)
+        self.assertTrue(Vault.is_vault_dir(new_vault_path))
+        self.assertFalse(Vault.is_vault_dir(mock_home))
+
 if __name__ == "__main__":
     unittest.main()
