@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self.sidebar.create_vault_requested.connect(self._on_create_vault)
         self.sidebar.open_vault_requested.connect(self._on_open_existing_vault)
         self.sidebar.remove_vault_requested.connect(self._on_remove_vault)
+        self.sidebar.rename_vault_display_name_requested.connect(self._on_rename_vault_display_name)
         self.sidebar.lock_vault_requested.connect(self.lock_vault)
         self.sidebar.create_entry_point_requested.connect(self._on_create_entry_point)
         self.sidebar.rename_entry_point_requested.connect(self._on_rename_entry_point)
@@ -209,6 +210,11 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
+        self.act_rename_vault = QAction("Rename Vault", self)
+        self.act_rename_vault.setToolTip("Rename vault display name")
+        self.act_rename_vault.triggered.connect(lambda: self._on_rename_vault_display_name(self.vault.root_dir if self.vault else None))
+        self.toolbar.addAction(self.act_rename_vault)
+
         self.act_lock = QAction("Lock Vault", self)
         self.act_lock.setToolTip("Lock vault and purge memory keys")
         self.act_lock.triggered.connect(self.lock_vault)
@@ -248,6 +254,7 @@ class MainWindow(QMainWindow):
         self.act_export.setEnabled(has_unlocked_vault)
         self.act_delete.setEnabled(has_unlocked_vault)
         self.act_lock.setEnabled(has_unlocked_vault)
+        self.act_rename_vault.setEnabled(has_unlocked_vault)
 
     def _apply_theme(self) -> None:
         qss = get_stylesheet(self.dark_mode)
@@ -258,6 +265,7 @@ class MainWindow(QMainWindow):
         self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=20))
         self.act_export.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=20))
         self.act_delete.setIcon(IconProvider.get_icon("trash", dark_mode=self.dark_mode, size=20))
+        self.act_rename_vault.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=20))
         self.act_lock.setIcon(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=20))
         self.act_logs.setIcon(IconProvider.get_icon("logs", dark_mode=self.dark_mode, size=20))
         self.act_theme.setIcon(
@@ -313,7 +321,7 @@ class MainWindow(QMainWindow):
             self.sidebar.refresh_vaults_list()
             return
 
-        if self.vault and self.vault.root_dir == path and self.vault.is_unlocked:
+        if self.vault and self.vault.root_dir.resolve() == path.resolve() and self.vault.is_unlocked:
             return
 
         try:
@@ -386,12 +394,68 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if res == QMessageBox.StandardButton.Yes:
-            if self.vault and self.vault.root_dir == vault_path:
+            if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
                 self.lock_vault()
                 self.vault = None
                 self.sidebar.set_current_vault(None)
             self.config.remove_vault(str(vault_path))
             self.sidebar.refresh_vaults_list()
+
+    def _on_rename_vault_display_name(self, vault_path: Optional[Path]) -> None:
+        """Prompt user and change the display name of a vault (persists to .arcvault and config)."""
+        if not vault_path:
+            if self.vault:
+                vault_path = self.vault.root_dir
+            else:
+                return
+
+        # Determine current display name
+        current_name = ""
+        if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
+            current_name = self.vault.name
+        else:
+            for it in self.config.known_vaults:
+                if str(Path(it.get("path", "")).resolve()) == str(vault_path.resolve()):
+                    current_name = it.get("name", vault_path.name)
+                    break
+            if not current_name:
+                current_name = vault_path.name
+
+        msg = f"Enter new display name for vault '{current_name}': (Physical directory: {vault_path.name})"
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Vault Display Name",
+            msg,
+            text=current_name,
+        )
+        if not ok or not new_name.strip() or new_name.strip() == current_name:
+            return
+
+        clean_name = new_name.strip()
+
+        # Update vault metadata
+        if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
+            self.vault.set_display_name(clean_name)
+        else:
+            marker = vault_path / Vault.MARKER_FILENAME
+            if marker.is_file():
+                try:
+                    data = json.loads(marker.read_text(encoding="utf-8"))
+                    data["name"] = clean_name
+                    marker.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
+        # Update config known vaults and UI
+        self.config.add_or_update_vault(str(vault_path), clean_name)
+        self.sidebar.refresh_vaults_list()
+
+        if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
+            self.sidebar.set_current_vault(self.vault)
+            self.setWindowTitle(f"ArcVault - {clean_name}")
+            self.refresh_current_view()
+
+        self.status_bar.showMessage(f"Vault display name changed to '{clean_name}'.")
 
     # --- Navigation & Entry Points ---
 

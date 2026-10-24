@@ -167,6 +167,44 @@ class Vault:
         )
 
     @property
+    def name(self) -> str:
+        """Return the display name of the vault."""
+        if self.metadata and self.metadata.name:
+            return self.metadata.name
+        return self.root_dir.name
+
+    def set_display_name(self, new_name: str) -> None:
+        """
+        Update the display name of the vault in its metadata without changing its physical root directory.
+        Persists the change in the .arcvault metadata file.
+        """
+        clean_name = new_name.strip()
+        if not clean_name:
+            raise ValueError("Vault display name cannot be empty.")
+
+        if not self.metadata:
+            self._read_metadata()
+        if self.metadata:
+            self.metadata.name = clean_name
+
+        marker = self.root_dir / self.MARKER_FILENAME
+        data = {}
+        if marker.is_file():
+            try:
+                data = json.loads(marker.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+
+        data["name"] = clean_name
+        if "vault_id" not in data and self.metadata:
+            data["vault_id"] = self.metadata.vault_id
+        if "version" not in data:
+            data["version"] = "2.0"
+
+        marker.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        log_info(f"Updated vault display name to '{clean_name}' for '{self.root_dir}'", category="VAULT")
+
+    @property
     def obfuscate_names(self) -> bool:
         if self.metadata:
             return self.metadata.obfuscate_names

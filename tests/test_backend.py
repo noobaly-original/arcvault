@@ -1,5 +1,6 @@
 """Unit tests for ArcVault core logic, 7z encryption, and vault management."""
 
+import json
 import shutil
 import tempfile
 import unittest
@@ -631,6 +632,29 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertTrue(vault.is_unlocked)
         self.assertTrue(Vault.is_vault_dir(new_vault_path))
         self.assertFalse(Vault.is_vault_dir(mock_home))
+
+    def test_change_vault_display_name(self) -> None:
+        """Verify changing vault display name updates metadata and persists across instances."""
+        vault_dir = self.root_path / "named_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Original Vault Name",
+            password=self.password,
+            sevenzip=self.sz,
+        )
+        self.assertEqual(vault.name, "Original Vault Name")
+
+        # Change display name
+        vault.set_display_name("Custom Secret Vault")
+        self.assertEqual(vault.name, "Custom Secret Vault")
+
+        # Verify persisted to .arcvault on disk
+        marker_data = json.loads((vault_dir / Vault.MARKER_FILENAME).read_text(encoding="utf-8"))
+        self.assertEqual(marker_data.get("name"), "Custom Secret Vault")
+
+        # Reopen with new instance and verify display name loaded
+        reopened = Vault(vault_dir, self.sz)
+        self.assertEqual(reopened.name, "Custom Secret Vault")
 
 if __name__ == "__main__":
     unittest.main()

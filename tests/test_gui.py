@@ -681,5 +681,41 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertIsNone(dlg.created_vault_path)
         dlg.close()
 
+    def test_rename_vault_display_name_in_gui(self) -> None:
+        """Verify changing vault display name via GUI updates vault, config, and sidebar."""
+        from PyQt6.QtWidgets import QInputDialog
+        from arc_vault.gui.main_window import MainWindow
+
+        vault_dir = self.root_path / "rename_gui_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Initial Vault Name",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config)
+        win.open_vault_by_path(vault_dir, prompt_unlock=False)
+        self.assertEqual(win.vault.name, "Initial Vault Name")
+
+        with patch.object(QInputDialog, "getText", return_value=("Renamed GUI Vault", True)):
+            win._on_rename_vault_display_name(vault_dir)
+
+        self.assertEqual(win.vault.name, "Renamed GUI Vault")
+
+        # Check config known vaults
+        matching = [v for v in win.config.known_vaults if str(Path(v["path"]).resolve()) == str(vault_dir.resolve())]
+        self.assertTrue(len(matching) > 0)
+        self.assertEqual(matching[0]["name"], "Renamed GUI Vault")
+
+        # Check sidebar list display
+        found_in_sidebar = False
+        for i in range(win.sidebar.vault_list.count()):
+            if "Renamed GUI Vault" in win.sidebar.vault_list.item(i).text():
+                found_in_sidebar = True
+                break
+        self.assertTrue(found_in_sidebar)
+        win.close()
+
 if __name__ == "__main__":
     unittest.main()

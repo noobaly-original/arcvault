@@ -82,6 +82,7 @@ class VaultSidebar(QWidget):
     create_vault_requested = pyqtSignal()
     open_vault_requested = pyqtSignal()
     remove_vault_requested = pyqtSignal(Path)
+    rename_vault_display_name_requested = pyqtSignal(Path)
     lock_vault_requested = pyqtSignal()
     create_entry_point_requested = pyqtSignal()
     rename_entry_point_requested = pyqtSignal(str)
@@ -324,6 +325,10 @@ class VaultSidebar(QWidget):
         act_open = menu.addAction("Select Vault")
         act_open.triggered.connect(lambda: self.vault_selected.emit(v_path))
 
+        act_rename = menu.addAction("Rename Display Name...")
+        act_rename.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+        act_rename.triggered.connect(lambda: self.rename_vault_display_name_requested.emit(v_path))
+
         act_reveal = menu.addAction("Reveal in System File Manager")
         act_reveal.setIcon(IconProvider.get_icon("external", dark_mode=self.dark_mode, size=16))
         act_reveal.triggered.connect(lambda: self._reveal_path(v_path))
@@ -343,6 +348,13 @@ class VaultSidebar(QWidget):
 
         ep_name = item.data(Qt.ItemDataRole.UserRole)
         if not ep_name:
+            # Vault Root (All Entries)
+            if self.current_vault:
+                menu = QMenu(self)
+                act_rename_v = menu.addAction("Rename Vault Display Name...")
+                act_rename_v.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+                act_rename_v.triggered.connect(lambda: self.rename_vault_display_name_requested.emit(self.current_vault.root_dir))
+                menu.exec(self.ep_list.viewport().mapToGlobal(pos))
             return
 
         menu = QMenu(self)
