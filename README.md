@@ -7,11 +7,15 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - The vault uses a **decoupled, chunked storage architecture (V2)** where virtual folder entry points house encrypted metadata, while file contents are stored in uncompressed, store-mode AES-256 encrypted chunks under `arc-data/`.
 - **Zero Re-Archiving Overhead**: Adding or deleting a file never rewrites existing archive contents.
 - **Complete Vendor Freedom**: All encrypted chunks are standard 7-Zip archives with AES-256 header encryption (`-mhe=on`). You can inspect or extract any chunk directly using **7-Zip, NanaZip, Keka, or PeaZip** on Windows, macOS, or Linux!
+- **Portable & Standalone**: Available as a single portable "onefile" executable across macOS, Windows, and Linux that runs out of the box without complex installers.
 
 ---
 
 ## ✨ Features
 
+- **Portable Onefile Executables & USB Mode**:
+  - Run ArcVault as a single, self-contained portable executable on **Windows** (`ArcVault.exe`), **Linux** (`ArcVault`), and **macOS** (`ArcVault` & `ArcVault.app`).
+  - **USB Drive Portable**: If 7-Zip is not installed system-wide on the host computer, simply drop `7z.exe` / `7zz` in the same directory as ArcVault, and the app detects it automatically.
 - **Configurable Name Obfuscation**:
   - Choose during vault creation whether folder and file names in `arc-data/` are disguised with random alphanumeric IDs (default, maximum privacy) or kept as plain human-readable names on disk for users who prefer directly readable encrypted folder trees.
 - **Blazing Fast Store-Mode Encryption**: Bypasses CPU-heavy compression (`-mx=0`) while enforcing maximum AES-256 header and data encryption (`-mhe=on`), achieving native SSD throughput (500+ MB/s).
@@ -28,6 +32,8 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - **Cloud Storage Friendly & Atomic Swaps**:
   - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
   - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
+- **Vault Nesting Safeguards**:
+  - ArcVault actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.arcvault`) from active vault stores.
 - **Deep Recursive Multi-Archive Search**:
   - Search across all virtual entry points and nested subfolders simultaneously in milliseconds.
   - Flexible scope selection: **Entire Vault (Recursive)**, **Current Archive (Recursive)**, or **Current Folder**.
@@ -37,6 +43,7 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
   - Keyboard shortcut: `Cmd+F` (macOS) or `Ctrl+F` (Windows/Linux) to instantly focus search.
 - **Retina & High-DPI Display Support**:
   - Vector SVG icon engine populates standard and Retina (2x/3x) pixmaps with full antialiasing and smooth transformations, ensuring crisp rendering on MacBooks, Retina screens, and 4K monitors.
+  - New minimalist vector app icon adhering to modern Apple Human Interface Guidelines.
 - **Fast & Reliable In-App & External Editing**:
   - **In-App Direct Editing**: Edit text, notes, JSON, and code files directly in the preview panel with `Save` (Ctrl+S / Cmd+S).
   - **External Editor Auto-Sync**: Right-click any file and select *Edit with Default App*. ArcVault extracts the file to a secure staging area watched with `QFileSystemWatcher`. Saving in your external editor (VS Code, TextEdit, Notepad) immediately updates the encrypted vault.
@@ -61,11 +68,11 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 ## 🚀 Quick Start
 
 ### 1. Requirements
-- Python 3.9+
+- Python 3.9+ (or use the precompiled standalone binaries below)
 - 7-Zip CLI (`7zz`, `7z`, or `nanazip`):
   - **macOS**: `brew install sevenzip`
   - **Linux**: `sudo apt install p7zip-full` or `sudo dnf install p7zip`
-  - **Windows**: Install 7-Zip or NanaZip.
+  - **Windows**: Install 7-Zip or NanaZip (or place `7z.exe` next to `ArcVault.exe`).
 
 ### 2. Installation
 ```bash
@@ -87,6 +94,41 @@ pip install -r requirements.txt
 ```bash
 python3 run.py
 ```
+
+---
+
+## 📦 1-Click Build Scripts & Portable Standalone Executables
+
+ArcVault includes automated build scripts to generate single-file portable executables across all major operating systems:
+
+### 🍎 macOS
+```bash
+chmod +x build_mac.sh
+./build_mac.sh
+```
+- **Outputs**:
+  - `dist/ArcVault` — Standalone portable onefile binary.
+  - `dist/ArcVault.app` — Native macOS Application Bundle.
+
+### 🪟 Windows
+In Command Prompt:
+```cmd
+build_windows.bat
+```
+Or in PowerShell:
+```powershell
+.\build_windows.ps1
+```
+- **Output**: `dist\ArcVault.exe` — Single portable executable file.
+
+### 🐧 Linux
+```bash
+chmod +x build_linux.sh
+./build_linux.sh
+```
+- **Output**: `dist/ArcVault` — Standalone portable ELF binary.
+
+*(For detailed packaging options, manual PyInstaller commands, and icon generation, see [**`BUILD.md`**](BUILD.md).)*
 
 ---
 
@@ -131,30 +173,13 @@ The test suite covers backend encryption, V2 chunking/shredding, atomic swapping
 
 ---
 
-## 📦 Compiling Standalone Binaries (PyInstaller)
-
-ArcVault can be compiled into a standalone desktop application or macOS app bundle using PyInstaller:
-
-```bash
-# Build using the included specification file
-pyinstaller arcvault.spec --noconfirm --clean
-```
-
-The resulting binaries will be located in `dist/`:
-- **macOS**: `dist/ArcVault.app` and `dist/ArcVault/ArcVault`
-- **Linux**: `dist/ArcVault/ArcVault`
-- **Windows**: `dist\ArcVault\ArcVault.exe`
-
-For detailed build instructions, cross-platform options, and icon assets, see [**`BUILD.md`**](BUILD.md).
-
----
-
 ## 🔒 Security Model
 
 - **Encryption**: Standard AES-256 with 7-Zip header encryption (`-mhe=on`). File names, chunk sizes, and internal folder hierarchies cannot be inspected without the master key.
 - **Atomic Operations**: All metadata changes are written to temporary scratch archives and atomically swapped into place (`os.replace`), preventing partial writes and synchronization corruption.
 - **Memory Safety**: Master passwords and encryption keys exist only in process RAM while unlocked, and are completely purged when the vault is locked or the application closes.
 - **Isolated Staging**: Previews and temporary extraction operations run inside permission-restricted directories cleaned up automatically on lock or termination.
+
 ---
 
 ## 👥 Contributors
@@ -173,4 +198,3 @@ ArcVault stands on the shoulders of giants. Special thanks and sincere gratitude
 - **[Pygments](https://pygments.org/) by Georg Brandl & the Python Community** — The robust syntax-highlighting engine driving in-app code and text file previews across hundreds of programming and markup languages.
 - **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.
 - **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle ArcVault into standalone, portable native binaries across macOS, Windows, and Linux.
-
