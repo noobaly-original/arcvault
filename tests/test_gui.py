@@ -622,5 +622,24 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertEqual(dlg.chk_obfuscate.text(), "Obfuscate folder & file names in arc-data")
         dlg.close()
 
+
+    def test_about_dialog_and_special_thanks(self) -> None:
+        """Verify AboutDialog contains contributors and special thanks credits for 7-Zip and libraries."""
+        from arc_vault.gui.about_dialog import AboutDialog
+
+        dlg = AboutDialog(dark_mode=True)
+        # Verify credits in dialog
+        all_labels = [lbl.text() for lbl in dlg.findChildren(QLabel)]
+        combined_text = " ".join(all_labels)
+
+        self.assertIn("Kenan (@noobaly-original)", combined_text)
+        self.assertIn("Antigravity (Google DeepMind)", combined_text)
+        self.assertIn("7-Zip by Igor Pavlov", combined_text)
+        self.assertIn("PyQt6", combined_text)
+        self.assertIn("Pygments", combined_text)
+        self.assertIn("Pillow", combined_text)
+        self.assertIn("PyInstaller", combined_text)
+        dlg.close()
+
 if __name__ == "__main__":
     unittest.main()

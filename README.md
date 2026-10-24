@@ -159,8 +159,20 @@ For detailed build instructions, cross-platform options, and icon assets, see [*
 - **Isolated Staging**: Previews and temporary extraction operations run inside permission-restricted directories cleaned up automatically on lock or termination.
 ---
 
-## 👥 Contributors & Acknowledgments
+## 👥 Contributors
 
 - **Kenan ([@noobaly-original](https://github.com/noobaly-original))** — Project Creator & Core Developer
 - **Antigravity (Google DeepMind)** — AI Pair Programmer & System Architect
+
+---
+
+## 🙏 Special Thanks & Open Source Credits
+
+ArcVault stands on the shoulders of giants. Special thanks and sincere gratitude to the authors and maintainers of the open-source libraries and utilities that make ArcVault possible:
+
+- **[7-Zip](https://www.7-zip.org/) by Igor Pavlov** — The foundational archival and cryptographic engine behind ArcVault. Igor Pavlov's extraordinary work on 7-Zip provides the rock-solid store-mode AES-256 header and payload encryption (`-mx=0`, `-mhe=on`) that powers ArcVault's lightning-fast SSD throughput and universal vendor independence.
+- **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/) (Riverbank Computing & The Qt Company)** — The world-class desktop application framework providing the sleek modern UI, high-DPI Retina vector graphics, multi-threaded background workers, and cross-platform native feel.
+- **[Pygments](https://pygments.org/) by Georg Brandl & the Python Community** — The robust syntax-highlighting engine driving in-app code and text file previews across hundreds of programming and markup languages.
+- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.
+- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle ArcVault into standalone, portable native binaries across macOS, Windows, and Linux.
 

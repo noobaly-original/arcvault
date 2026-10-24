@@ -234,6 +234,11 @@ class MainWindow(QMainWindow):
         self.act_preview_toggle.triggered.connect(self._toggle_preview_panel)
         self.toolbar.addAction(self.act_preview_toggle)
 
+        self.act_about = QAction("About", self)
+        self.act_about.setToolTip("About ArcVault, contributors & special thanks")
+        self.act_about.triggered.connect(self._show_about_dialog)
+        self.toolbar.addAction(self.act_about)
+
         self._update_toolbar_state()
 
     def _update_toolbar_state(self) -> None:
@@ -259,6 +264,7 @@ class MainWindow(QMainWindow):
             IconProvider.get_icon("sun" if self.dark_mode else "moon", dark_mode=self.dark_mode, size=20)
         )
         self.act_preview_toggle.setIcon(IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=20))
+        self.act_about.setIcon(IconProvider.get_icon("info", dark_mode=self.dark_mode, size=20))
 
         self.sidebar.set_theme(self.dark_mode)
         self.breadcrumbs.set_theme(self.dark_mode)
@@ -271,6 +277,11 @@ class MainWindow(QMainWindow):
         self.config.theme = "dark" if self.dark_mode else "light"
         self.config.save()
         self._apply_theme()
+
+    def _show_about_dialog(self) -> None:
+        from arc_vault.gui.about_dialog import AboutDialog
+        dlg = AboutDialog(self, dark_mode=self.dark_mode)
+        dlg.exec()
 
     def _toggle_preview_panel(self) -> None:
         sizes = self.main_splitter.sizes()
