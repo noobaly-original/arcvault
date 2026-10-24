@@ -313,5 +313,41 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertIsNone(preview_large)  # Must be blocked!
 
 
+    def test_atomic_metadata_save_and_backup_recovery(self) -> None:
+        """Verify save_metadata uses atomic swap, generates .bak, and recovers from corruption."""
+        vault = Vault.create_vault(
+            self.root_path,
+            name="Atomic Vault",
+            password=self.password,
+            initial_entry_points=["secure"],
+            sevenzip=self.sz,
+        )
+
+        # Add first file
+        test_file = self.root_path / "hello.txt"
+        test_file.write_text("hello atomic world", encoding="utf-8")
+        vault.add_files("secure", [test_file])
+
+        # Add second file so .bak contains version with hello.txt
+        test_file2 = self.root_path / "world.txt"
+        test_file2.write_text("world", encoding="utf-8")
+        vault.add_files("secure", [test_file2])
+
+        ep_archive = self.root_path / "secure.7z"
+        bak_file = self.root_path / ".secure.bak"
+
+        # Check that .secure.bak exists after saving updates
+        self.assertTrue(ep_archive.exists())
+        self.assertTrue(bak_file.exists())
+
+        # Test recovery: corrupt the live archive by zeroing it
+        ep_archive.write_bytes(b"")
+
+        # Load metadata should transparently fallback to .secure.bak
+        recovered_meta = vault.v2_engine.load_metadata(ep_archive, self.password)
+        self.assertIsNotNone(recovered_meta)
+        self.assertIn("hello.txt", recovered_meta.items)
+
+
 if __name__ == "__main__":
     unittest.main()

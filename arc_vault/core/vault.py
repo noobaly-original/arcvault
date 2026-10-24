@@ -168,7 +168,7 @@ class Vault:
         else:
             sevenz_files = [
                 f for f in self.root_dir.glob("*.7z")
-                if f.name != self.CHECK_FILENAME
+                if not f.name.startswith(".") and not f.name.endswith(".bak") and f.name != self.CHECK_FILENAME
             ]
             if sevenz_files:
                 first_archive = sevenz_files[0]
@@ -230,7 +230,7 @@ class Vault:
 
         self.entry_points.clear()
         for file in sorted(self.root_dir.glob("*.7z")):
-            if file.name == self.CHECK_FILENAME:
+            if file.name.startswith(".") or file.name.endswith(".bak") or file.name == self.CHECK_FILENAME:
                 continue
 
             ep_name = file.stem
@@ -320,17 +320,8 @@ class Vault:
         except Exception as e:
             log_warning(f"Error during legacy migration of '{ep_name}': {e}")
 
-        # Save metadata and recreate lightweight archive containing only metadata.json
+        # Save metadata and recreate lightweight archive containing only metadata.json (atomic swap)
         self.v2_engine.save_metadata(ep_file, meta, self.password)
-        # Clean up any leftover files inside ep_file except metadata.json
-        try:
-            current_7z_items = self.sevenzip.list_archive(ep_file, self.password)
-            to_delete = [i.path for i in current_7z_items if i.name != METADATA_FILENAME]
-            if to_delete:
-                self.sevenzip.delete_items(ep_file, to_delete, self.password)
-        except Exception:
-            pass
-
         log_info(f"Successfully migrated '{ep_name}.7z' to V2 format ({len(meta.items)} items).")
         return meta
 

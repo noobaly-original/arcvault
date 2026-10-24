@@ -12,6 +12,7 @@ Under V2:
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shutil
 import string
@@ -23,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from arc_vault.core.models import ArchiveItem, FileCategory, classify_file
 from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
-from arc_vault.logger import log_info, log_warning
+from arc_vault.logger import log_error, log_info, log_warning
 
 # Default chunk size: 1 GB (1024 * 1024 * 1024 bytes)
 DEFAULT_CHUNK_SIZE: int = 1024 * 1024 * 1024
@@ -146,43 +147,84 @@ class V2StorageEngine:
         return meta
 
     def load_metadata(self, archive_path: Path, password: str) -> Optional[V2EntryPointMetadata]:
-        """Read and parse metadata.json from {entry_point}.7z."""
+        """Read and parse metadata.json from {entry_point}.7z with fallback to .bak if available."""
         if not archive_path.exists():
             return None
 
-        with tempfile.TemporaryDirectory(prefix="arc_meta_load_") as tmp_dir:
-            extracted_path = self.sevenzip.extract_file_for_preview(
-                archive_path, METADATA_FILENAME, password, Path(tmp_dir)
-            )
-            if not extracted_path or not extracted_path.exists():
-                return None
+        candidates = [archive_path]
+        bak_file = archive_path.parent / f".{archive_path.stem}.bak"
+        if bak_file.exists():
+            candidates.append(bak_file)
 
-            try:
-                json_str = extracted_path.read_text(encoding="utf-8")
-                return V2EntryPointMetadata.from_json(json_str)
-            except Exception as e:
-                log_warning(f"Failed to parse metadata from {archive_path.name}: {e}")
-                return None
+        for cand in candidates:
+            with tempfile.TemporaryDirectory(prefix="arc_meta_load_") as tmp_dir:
+                extracted_path = self.sevenzip.extract_file_for_preview(
+                    cand, METADATA_FILENAME, password, Path(tmp_dir)
+                )
+                if not extracted_path or not extracted_path.exists():
+                    continue
+
+                try:
+                    json_str = extracted_path.read_text(encoding="utf-8")
+                    return V2EntryPointMetadata.from_json(json_str)
+                except Exception as e:
+                    log_warning(f"Failed to parse metadata from {cand.name}: {e}")
+                    continue
+
+        return None
 
     def save_metadata(self, archive_path: Path, meta: V2EntryPointMetadata, password: str) -> bool:
-        """Pack metadata.json into {entry_point}.7z with AES-256 header encryption."""
+        """
+        Pack metadata.json into {entry_point}.7z with AES-256 header encryption using an atomic swap.
+        Never touches archive_path in-place to avoid cloud sync file-locking issues.
+        """
+        parent_dir = archive_path.parent
+        parent_dir.mkdir(parents=True, exist_ok=True)
+
         with tempfile.TemporaryDirectory(prefix="arc_meta_save_") as tmp_dir:
             meta_file = Path(tmp_dir) / METADATA_FILENAME
             meta_file.write_text(meta.to_json(), encoding="utf-8")
 
-            # Update/replace metadata.json in archive
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create clean, isolated archive inside temp_dir
+            temp_archive = Path(tmp_dir) / "staged_meta.7z"
             cmd = [
                 "a",
                 f"-p{password}",
                 "-mhe=on",
                 "-mx=5",
                 "-y",
-                str(archive_path.resolve()),
+                temp_archive.name,
                 METADATA_FILENAME,
             ]
             res = self.sevenzip._run(cmd, cwd=Path(tmp_dir))
-            return res.returncode in (0, 1)
+            if res.returncode not in (0, 1) or not temp_archive.exists():
+                log_error(f"Failed to create metadata archive for {archive_path.name}")
+                return False
+
+            # Stage in target directory so os.replace is on the same filesystem (atomic POSIX/NTFS rename)
+            staged_in_target_dir = parent_dir / f".{archive_path.stem}_{generate_random_id(6)}.tmp"
+            try:
+                shutil.copy2(temp_archive, staged_in_target_dir)
+
+                # Keep backup of previous metadata archive before replacing
+                if archive_path.exists():
+                    bak_file = parent_dir / f".{archive_path.stem}.bak"
+                    try:
+                        shutil.copy2(archive_path, bak_file)
+                    except Exception:
+                        pass
+
+                # Atomic swap into archive_path
+                os.replace(staged_in_target_dir, archive_path)
+                return True
+            except Exception as e:
+                log_error(f"Atomic metadata replace failed for {archive_path.name}: {e}")
+                if staged_in_target_dir.exists():
+                    try:
+                        staged_in_target_dir.unlink()
+                    except Exception:
+                        pass
+                return False
 
     def chunk_and_encrypt_file(
         self,
