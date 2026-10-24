@@ -8,6 +8,8 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - **Zero Re-Archiving Overhead**: Adding or deleting a file never rewrites existing archive contents.
 - **Complete Vendor Freedom**: All encrypted chunks are standard 7-Zip archives with AES-256 header encryption (`-mhe=on`). You can inspect or extract any chunk directly using **7-Zip, NanaZip, Keka, or PeaZip** on Windows, macOS, or Linux!
 
+- ⚠️ Even though the idea for the project and the virtual folder-like vault logic are human, all the code in this project was generated using Google Antigravity. Therefore THIS PROJECT IS VIBE CODED.
+
 ---
 
 ## ✨ Features
