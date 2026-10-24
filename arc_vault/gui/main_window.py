@@ -78,7 +78,11 @@ class MainWindow(QMainWindow):
         self.resize(1180, 740)
         self.setMinimumSize(850, 500)
 
-        icon_path = Path(__file__).parent.parent / "resources" / "icon.png"
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            icon_path = Path(meipass) / "arc_vault" / "resources" / "icon.png"
+        else:
+            icon_path = Path(__file__).parent.parent / "resources" / "icon.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 

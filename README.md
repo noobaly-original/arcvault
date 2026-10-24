@@ -67,7 +67,7 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 
 ### 2. Installation
 ```bash
-git clone https://github.com/your-username/archive-explorer.git
+git clone https://github.com/noobaly-original/archive-explorer.git
 cd archive-explorer
 
 # Using uv (recommended):
@@ -122,6 +122,24 @@ The test suite covers backend encryption, V2 chunking/shredding, atomic swapping
 ```bash
 .venv/bin/python3 -m unittest discover tests -v
 ```
+
+---
+
+## 📦 Compiling Standalone Binaries (PyInstaller)
+
+ArcVault can be compiled into a standalone desktop application or macOS app bundle using PyInstaller:
+
+```bash
+# Build using the included specification file
+pyinstaller arcvault.spec --noconfirm --clean
+```
+
+The resulting binaries will be located in `dist/`:
+- **macOS**: `dist/ArcVault.app` and `dist/ArcVault/ArcVault`
+- **Linux**: `dist/ArcVault/ArcVault`
+- **Windows**: `dist\ArcVault\ArcVault.exe`
+
+For detailed build instructions, cross-platform options, and icon assets, see [**`BUILD.md`**](BUILD.md).
 
 ---
 
