@@ -293,5 +293,66 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertEqual(type_item_1.text(), "Image")
 
 
+
+    def test_toolbar_icon_resolutions_and_sharpness(self) -> None:
+        """Verify toolbar and UI icons supply sharp multi-resolution pixmaps for 20px, 24px, and 32px."""
+        from PyQt6.QtCore import QSize
+        icon = IconProvider.get_icon("add_file", dark_mode=True, size=20)
+        
+        # Verify available sizes cover 1x, 2x Retina, 3x for both 20px and 32px
+        avail_tuples = [(s.width(), s.height()) for s in icon.availableSizes()]
+        self.assertIn((20, 20), avail_tuples)
+        self.assertIn((40, 40), avail_tuples)  # 20px @ 2x Retina
+        self.assertIn((60, 60), avail_tuples)  # 20px @ 3x
+        self.assertIn((32, 32), avail_tuples)
+        self.assertIn((64, 64), avail_tuples)  # 32px @ 2x Retina
+
+        # Test Retina DPR 2.0 direct pixmap generation
+        pix20 = IconProvider.get_pixmap("add_file", size=20, dpr=2.0)
+        self.assertEqual(pix20.width(), 40)
+        self.assertEqual(pix20.devicePixelRatio(), 2.0)
+
+        pix32 = IconProvider.get_pixmap("add_file", size=32, dpr=2.0)
+        self.assertEqual(pix32.width(), 64)
+        self.assertEqual(pix32.devicePixelRatio(), 2.0)
+
+    def test_preview_panel_collapsed_recovery(self) -> None:
+        """Verify that a collapsed preview panel (width 0 from old saved state) is auto-expanded."""
+        import base64
+        from PyQt6.QtCore import QByteArray
+        
+        # Use the exact corrupted splitter state where preview panel was 0px wide
+        bad_splitter_state = "AAAA/wAAAAEAAAADAAAAzgAAAoIAAAAAAf////8BAAAAAQA="
+        self.config.splitter_state = bad_splitter_state
+        self.config.save()
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.show()
+        QApplication.processEvents()
+        sizes = win.main_splitter.sizes()
+        self.assertGreaterEqual(len(sizes), 3)
+        self.assertGreaterEqual(sizes[2], 260, "Preview panel must be auto-expanded if collapsed to 0")
+        self.assertFalse(win.preview_panel.isHidden())
+        win.close()
+
+    def test_preview_panel_card_only_and_plain_text_detection(self) -> None:
+        """Verify show_card_only and text detection on files with generic extensions."""
+        panel = PreviewPanel()
+        
+        # 1. Immediate card display without disk file
+        item = ArchiveItem(name="document.dat", path="document.dat", size=2048, category=FileCategory.GENERIC)
+        panel.show_card_only(item, status_note="Extracting preview...")
+        self.assertEqual(panel.stack.currentIndex(), 3)
+        self.assertIn("document.dat", panel.card_name.text())
+        self.assertIn("Extracting preview...", panel.card_details.text())
+
+        # 2. Text detection on generic extension file
+        txt_file = self.root_path / "README"
+        txt_file.write_text("ArcVault Quickstart Guide", encoding="utf-8")
+        readme_item = ArchiveItem(name="README", path="README", size=25, category=FileCategory.GENERIC)
+        panel.show_preview(readme_item, txt_file)
+        self.assertEqual(panel.stack.currentIndex(), 1)
+        self.assertIn("ArcVault Quickstart Guide", panel.text_edit.toPlainText())
+
 if __name__ == "__main__":
     unittest.main()

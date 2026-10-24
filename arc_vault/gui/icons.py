@@ -1,4 +1,4 @@
-"""High-resolution vector icon provider for ArcVault with Retina and multi-DPI scaling."""
+"""SVG-based vector icon provider with crisp Retina high-DPI scaling for ArcVault."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QApplication
 from arc_vault.core.models import FileCategory
 
 
-# Clean, modern vector SVGs
+# Clean, modern SVG icon templates (Lucide / Feather inspired)
 SVG_ICONS = {
     # App Logo / Vault Lock
     "vault": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -61,37 +61,33 @@ SVG_ICONS = {
 
     # Document (PDF / Office)
     "document": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-        <line x1="10" y1="9" x2="8" y2="9"/>
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+        <path d="M6 6h10"/>
+        <path d="M6 10h10"/>
+        <path d="M6 14h6"/>
     </svg>""",
 
-    # Special Executable - Windows (.exe, .bat, .cmd)
+    # Executables - Windows
     "executable_windows": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
-        <path d="M8 8h3v3H8z" fill="{color}"/>
-        <path d="M13 8h3v3h-3z" fill="{color}"/>
-        <path d="M8 13h3v3H8z" fill="{color}"/>
-        <path d="M13 13h3v3h-3z" fill="{color}"/>
+        <rect x="3" y="3" width="8" height="8" rx="1"/>
+        <rect x="13" y="3" width="8" height="8" rx="1"/>
+        <rect x="3" y="13" width="8" height="8" rx="1"/>
+        <rect x="13" y="13" width="8" height="8" rx="1"/>
     </svg>""",
 
-    # Special Executable - macOS (.app, .dmg, .pkg)
+    # Executables - macOS
     "executable_macos": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect width="18" height="18" x="3" y="3" rx="4" ry="4"/>
-        <polygon points="12 7 15 13 9 13" fill="{color}"/>
-        <line x1="8" y1="17" x2="16" y2="17"/>
+        <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+        <path d="m9 12 2 2 4-4"/>
     </svg>""",
 
-    # Executable - Unix / Linux (.sh, .bin)
+    # Executables - Unix/Linux
     "executable_unix": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect width="18" height="18" x="3" y="3" rx="2"/>
-        <polyline points="7 9 10 12 7 15"/>
-        <line x1="12" y1="15" x2="16" y2="15"/>
+        <polyline points="4 17 10 11 4 5"/>
+        <line x1="12" y1="19" x2="20" y2="19"/>
     </svg>""",
 
-    # Archive (.7z, .zip, .tar)
+    # Archive
     "archive": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect width="20" height="5" x="2" y="3" rx="1"/>
         <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
@@ -107,11 +103,11 @@ SVG_ICONS = {
 
     # Video
     "video": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect width="20" height="15" x="2" y="4" rx="2"/>
-        <polygon points="10 8 16 11.5 10 15" fill="{color}"/>
+        <rect width="14" height="14" x="2" y="5" rx="2"/>
+        <polygon points="16 10 22 7 22 17 16 14"/>
     </svg>""",
 
-    # Security Key / Certificate
+    # Keys / Certificates
     "key_cert": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="7.5" cy="15.5" r="5.5"/>
         <path d="m21 2-9.6 9.6"/>
@@ -124,69 +120,115 @@ SVG_ICONS = {
         <polyline points="14 2 14 8 20 8"/>
     </svg>""",
 
-    # UI Icons
-    "plus": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>""",
-    "trash": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>""",
-    "refresh": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>""",
-    "arrow_left": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>""",
-    "arrow_up": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>""",
-    "sun": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>""",
-    "moon": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>""",
-    "eye": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>""",
-    "eye_off": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/></svg>""",
-    "search": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>""",
+    # UI Actions
+    "plus": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>""",
 
-    # Add File (ingoing arrow: bringing files INTO vault)
-    "add_file": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>""",
-    "download": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>""",
+    # Inward arrow (importing/adding files into archive)
+    "add_file": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
+        <path d="M12 12v9"/>
+        <path d="m8 17 4 4 4-4"/>
+    </svg>""",
 
-    # Export (outgoing arrow: extracting files OUT OF vault)
-    "export": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>""",
-    "upload": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>""",
+    # Outward arrow (exporting/extracting files out to local disk)
+    "export": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
+        <path d="M12 12v9"/>
+        <path d="m16 16-4-4-4 4"/>
+    </svg>""",
 
-    # Logs / Console / Activity
-    "logs": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><polyline points="8 9 11 12 8 15"/><line x1="13" y1="15" x2="16" y2="15"/></svg>""",
+    # Dedicated logs pane icon
+    "logs": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10 9 9 9 8 9"/>
+    </svg>""",
 
-    "external": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>""",
-    "sidebar": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>""",
-    "preview": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>""",
-    "edit": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>""",
-    "save": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>""",
+    "trash": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    </svg>""",
+
+    "edit": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>""",
+
+    "save": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+        <polyline points="17 21 17 13 7 13 7 21"/>
+        <polyline points="7 3 7 8 15 8"/>
+    </svg>""",
+
+    "arrow_up": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5"/>
+        <polyline points="5 12 12 5 19 12"/>
+    </svg>""",
+
+    "refresh": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+    </svg>""",
+
+    "sun": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"/>
+        <line x1="12" y1="1" x2="12" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/>
+        <line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+    </svg>""",
+
+    "moon": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    </svg>""",
+
+    "preview": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <line x1="15" y1="3" x2="15" y2="21"/>
+    </svg>""",
 }
 
-# Distinctive color mappings for file categories
+# Category colors for Light and Dark themes
 CATEGORY_COLORS_DARK = {
-    FileCategory.ENTRY_POINT: "#38BDF8",        # Cyan blue
-    FileCategory.FOLDER: "#FBBF24",             # Warm folder amber
-    FileCategory.IMAGE: "#A78BFA",              # Violet
-    FileCategory.TEXT: "#94A3B8",               # Slate
-    FileCategory.CODE: "#34D399",               # Emerald green
-    FileCategory.DOCUMENT: "#F87171",           # Coral red
-    FileCategory.EXECUTABLE_WINDOWS: "#60A5FA",  # Windows blue
-    FileCategory.EXECUTABLE_MACOS: "#F472B6",    # Pink / Apple rose
-    FileCategory.EXECUTABLE_UNIX: "#4ADE80",     # Terminal green
-    FileCategory.ARCHIVE: "#F59E0B",            # Amber
-    FileCategory.AUDIO: "#FB923C",              # Orange
-    FileCategory.VIDEO: "#EC4899",              # Magenta
-    FileCategory.KEY_CERT: "#EAB308",           # Yellow key
-    FileCategory.GENERIC: "#94A3B8",            # Slate
+    FileCategory.ENTRY_POINT: "#38BDF8",  # Sky Blue
+    FileCategory.FOLDER: "#FBBF24",       # Amber
+    FileCategory.IMAGE: "#A78BFA",        # Purple
+    FileCategory.TEXT: "#34D399",         # Emerald
+    FileCategory.CODE: "#60A5FA",         # Blue
+    FileCategory.DOCUMENT: "#F472B6",     # Pink
+    FileCategory.EXECUTABLE_WINDOWS: "#F87171",  # Red
+    FileCategory.EXECUTABLE_MACOS: "#FB7185",    # Rose
+    FileCategory.EXECUTABLE_UNIX: "#34D399",     # Mint
+    FileCategory.ARCHIVE: "#F59E0B",      # Orange
+    FileCategory.AUDIO: "#818CF8",        # Indigo
+    FileCategory.VIDEO: "#EC4899",        # Magenta
+    FileCategory.KEY_CERT: "#EAB308",     # Gold
+    FileCategory.GENERIC: "#94A3B8",      # Slate
 }
 
 CATEGORY_COLORS_LIGHT = {
-    FileCategory.ENTRY_POINT: "#0284C7",        # Deep cyan
-    FileCategory.FOLDER: "#D97706",             # Deep amber
-    FileCategory.IMAGE: "#7C3AED",              # Purple
-    FileCategory.TEXT: "#475569",               # Slate
-    FileCategory.CODE: "#059669",               # Green
-    FileCategory.DOCUMENT: "#DC2626",           # Red
-    FileCategory.EXECUTABLE_WINDOWS: "#2563EB",  # Blue
-    FileCategory.EXECUTABLE_MACOS: "#DB2777",    # Pink
-    FileCategory.EXECUTABLE_UNIX: "#16A34A",     # Green
-    FileCategory.ARCHIVE: "#D97706",            # Amber
-    FileCategory.AUDIO: "#EA580C",              # Orange
-    FileCategory.VIDEO: "#C026D3",              # Magenta
-    FileCategory.KEY_CERT: "#CA8A04",           # Gold
-    FileCategory.GENERIC: "#64748B",            # Slate
+    FileCategory.ENTRY_POINT: "#0284C7",
+    FileCategory.FOLDER: "#D97706",
+    FileCategory.IMAGE: "#7C3AED",
+    FileCategory.TEXT: "#059669",
+    FileCategory.CODE: "#2563EB",
+    FileCategory.DOCUMENT: "#DB2777",
+    FileCategory.EXECUTABLE_WINDOWS: "#DC2626",
+    FileCategory.EXECUTABLE_MACOS: "#E11D48",
+    FileCategory.EXECUTABLE_UNIX: "#059669",
+    FileCategory.ARCHIVE: "#D97706",
+    FileCategory.AUDIO: "#4F46E5",
+    FileCategory.VIDEO: "#BE185D",
+    FileCategory.KEY_CERT: "#CA8A04",
+    FileCategory.GENERIC: "#64748B",
 }
 
 
@@ -214,7 +256,9 @@ class IconProvider:
         painter.end()
 
         img.setDevicePixelRatio(dpr)
-        return QPixmap.fromImage(img)
+        pixmap = QPixmap.fromImage(img)
+        pixmap.setDevicePixelRatio(dpr)
+        return pixmap
 
     @classmethod
     def get_category_icon(cls, category: FileCategory, dark_mode: bool = True, size: int = 24) -> QIcon:
@@ -267,6 +311,15 @@ class IconProvider:
         # Add 1x, 2x (Retina), and 3x pixmaps for the requested logical size
         for dpr in (1.0, 2.0, 3.0):
             icon.addPixmap(cls._render_svg_pixmap(renderer, size, dpr))
+
+        # Also register common standard UI sizes so scaling across any Qt component
+        # (e.g. QToolBar at 20px/24px/32px, QMenu, QToolButton) always has a razor-sharp pixel-exact render
+        common_sizes = (16, 18, 20, 22, 24, 28, 32, 48, 64)
+        for s in common_sizes:
+            if s == size:
+                continue
+            for dpr in (1.0, 2.0, 3.0):
+                icon.addPixmap(cls._render_svg_pixmap(renderer, s, dpr))
 
         cls._cache[cache_key] = icon
         return icon

@@ -734,7 +734,14 @@ class Vault:
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        meta = self._v2_metadata[entry_point_name]
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta and entry_point_name in self.entry_points:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+        if not meta:
+            return None
+
         clean_path = internal_path.strip("/").replace("\\", "/")
         item = meta.items.get(clean_path)
         if not item or item.is_dir:
@@ -747,7 +754,8 @@ class Vault:
 
         ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         item_dir = ep_data_dir / item.item_id
-        preview_dir = self.get_preview_temp_dir()
+        preview_dir = self.get_preview_temp_dir() / item.item_id
+        preview_dir.mkdir(parents=True, exist_ok=True)
         dest_file = preview_dir / item.name
 
         ok = self.v2_engine.extract_file_to_destination(item, item_dir, self.password, dest_file)
@@ -758,7 +766,13 @@ class Vault:
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        meta = self._v2_metadata[entry_point_name]
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta and entry_point_name in self.entry_points:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+        if not meta:
+            return None
         clean_path = internal_path.strip("/").replace("\\", "/")
         item = meta.items.get(clean_path)
         if not item or item.is_dir:

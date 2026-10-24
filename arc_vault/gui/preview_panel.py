@@ -178,20 +178,23 @@ class PreviewPanel(QWidget):
         img_bar_layout.addWidget(self.lbl_img_dim)
         img_bar_layout.addStretch()
 
-        self.btn_zoom_in = QToolButton()
-        self.btn_zoom_in.setText("+")
-        self.btn_zoom_in.clicked.connect(self._zoom_in)
-        img_bar_layout.addWidget(self.btn_zoom_in)
+        btn_zoom_in = QToolButton()
+        btn_zoom_in.setText("+")
+        btn_zoom_in.setToolTip("Zoom In")
+        btn_zoom_in.clicked.connect(self._zoom_in)
+        img_bar_layout.addWidget(btn_zoom_in)
 
-        self.btn_zoom_out = QToolButton()
-        self.btn_zoom_out.setText("-")
-        self.btn_zoom_out.clicked.connect(self._zoom_out)
-        img_bar_layout.addWidget(self.btn_zoom_out)
+        btn_zoom_out = QToolButton()
+        btn_zoom_out.setText("-")
+        btn_zoom_out.setToolTip("Zoom Out")
+        btn_zoom_out.clicked.connect(self._zoom_out)
+        img_bar_layout.addWidget(btn_zoom_out)
 
-        self.btn_zoom_fit = QToolButton()
-        self.btn_zoom_fit.setText("Fit")
-        self.btn_zoom_fit.clicked.connect(self._zoom_fit)
-        img_bar_layout.addWidget(self.btn_zoom_fit)
+        btn_zoom_fit = QToolButton()
+        btn_zoom_fit.setText("Fit")
+        btn_zoom_fit.setToolTip("Fit to Window")
+        btn_zoom_fit.clicked.connect(self._zoom_fit)
+        img_bar_layout.addWidget(btn_zoom_fit)
 
         img_layout.addWidget(img_bar)
 
@@ -216,7 +219,7 @@ class PreviewPanel(QWidget):
 
         self.card_name = QLabel()
         self.card_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.card_name.setStyleSheet("font-weight: 600; font-size: 14px;")
+        self.card_name.setStyleSheet("font-weight: bold; font-size: 15px;")
         self.card_name.setWordWrap(True)
         card_layout.addWidget(self.card_name)
 
@@ -245,6 +248,8 @@ class PreviewPanel(QWidget):
         self.btn_save_text.setIcon(IconProvider.get_icon("save", dark_mode=self.dark_mode, size=16))
         if self.current_item and self.current_file_path:
             self.show_preview(self.current_item, self.current_file_path)
+        elif self.current_item:
+            self._show_card(self.current_item)
 
     def set_empty(self) -> None:
         """Reset to empty preview state."""
@@ -265,8 +270,36 @@ class PreviewPanel(QWidget):
         )
         self.stack.setCurrentIndex(0)
 
+    def show_card_only(self, item: ArchiveItem, status_note: str = "") -> None:
+        """Display metadata card immediately without requiring an extracted local file."""
+        self.current_item = item
+        self.current_file_path = None
+        self._is_editing_text = False
+        self.lbl_title.setText(item.name)
+        self.btn_open_external.setEnabled(False)
+        self.btn_edit_external.setEnabled(False)
+        self.btn_export.setEnabled(True)
+        self.btn_copy_text.setVisible(False)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
+        self._show_card(item, status_note=status_note)
+
+    @staticmethod
+    def _is_text_file(path: Path) -> bool:
+        """Quickly check if a file contains valid readable text without binary null bytes."""
+        try:
+            with open(path, "rb") as f:
+                sample = f.read(1024)
+            if b"\x00" in sample:
+                return False
+            sample.decode("utf-8", errors="strict")
+            return True
+        except Exception:
+            return False
+
     def show_preview(self, item: ArchiveItem, local_path: Path) -> None:
-        """Display preview based on file category."""
+        """Display preview based on file category and content."""
         self.current_item = item
         self.current_file_path = local_path
         self._is_editing_text = False
@@ -283,6 +316,11 @@ class PreviewPanel(QWidget):
             self._show_image(local_path)
         elif category in {FileCategory.TEXT, FileCategory.CODE}:
             self._show_text(item, local_path)
+        elif category in {FileCategory.DOCUMENT, FileCategory.GENERIC}:
+            if self._is_text_file(local_path):
+                self._show_text(item, local_path)
+            else:
+                self._show_card(item)
         else:
             self._show_card(item)
 
@@ -322,7 +360,7 @@ class PreviewPanel(QWidget):
         self._update_image_display()
 
     def _zoom_fit(self) -> None:
-        if not self._original_pixmap:
+        if not self._original_pixmap or self._original_pixmap.width() == 0 or self._original_pixmap.height() == 0:
             return
         area_size = self.image_scroll.viewport().size()
         factor_w = (area_size.width() - 20) / self._original_pixmap.width()
@@ -339,6 +377,11 @@ class PreviewPanel(QWidget):
         self.text_edit.setReadOnly(True)
 
         try:
+            with open(local_path, "rb") as f:
+                initial = f.read(1024)
+            if b"\x00" in initial:
+                self._show_card(item)
+                return
             content = local_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             self._show_card(item)
@@ -406,7 +449,7 @@ class PreviewPanel(QWidget):
                 pass
         self._cancel_text_edit()
 
-    def _show_card(self, item: ArchiveItem) -> None:
+    def _show_card(self, item: ArchiveItem, status_note: str = "") -> None:
         self.btn_copy_text.setVisible(False)
         self.btn_edit_text.setVisible(False)
         self.btn_save_text.setVisible(False)
@@ -442,12 +485,14 @@ class PreviewPanel(QWidget):
             ratio_val = (1.0 - (item.packed_size / item.size)) * 100
             ratio = f"<br><b>Compression:</b> {ratio_val:.1f}% saved"
 
+        note_html = f"<br><span style='color: #38bdf8;'><i>{status_note}</i></span>" if status_note else ""
+
         details_html = f"""
             <b>Size:</b> {format_size(item.size)}<br>
             <b>Compressed:</b> {format_size(item.packed_size)}{ratio}<br>
             <b>Modified:</b> {item.modified or 'Unknown'}<br>
             <b>Encrypted:</b> AES-256 (7-Zip)<br>
-            <b>CRC32:</b> {item.crc or 'N/A'}
+            <b>CRC32:</b> {item.crc or 'N/A'}{note_html}
         """
         self.card_details.setText(details_html)
         self.stack.setCurrentIndex(3)

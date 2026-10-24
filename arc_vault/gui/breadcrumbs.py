@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -35,12 +35,14 @@ class BreadcrumbBar(QWidget):
         # Up navigation button
         self.btn_up = QToolButton(self)
         self.btn_up.setToolTip("Go to Parent Folder (Up)")
+        self.btn_up.setIconSize(QSize(16, 16))
         self.btn_up.clicked.connect(self._on_up_clicked)
         self.layout.addWidget(self.btn_up)
 
         # Refresh button
         self.btn_refresh = QToolButton(self)
         self.btn_refresh.setToolTip("Refresh Current View")
+        self.btn_refresh.setIconSize(QSize(16, 16))
         self.btn_refresh.clicked.connect(self.refresh_requested.emit)
         self.layout.addWidget(self.btn_refresh)
 
@@ -60,8 +62,8 @@ class BreadcrumbBar(QWidget):
         self.update_icons()
 
     def update_icons(self) -> None:
-        self.btn_up.setIcon(IconProvider.get_icon("arrow_up", dark_mode=self.dark_mode, size=18))
-        self.btn_refresh.setIcon(IconProvider.get_icon("refresh", dark_mode=self.dark_mode, size=18))
+        self.btn_up.setIcon(IconProvider.get_icon("arrow_up", dark_mode=self.dark_mode, size=16))
+        self.btn_refresh.setIcon(IconProvider.get_icon("refresh", dark_mode=self.dark_mode, size=16))
 
     def set_theme(self, dark_mode: bool) -> None:
         self.dark_mode = dark_mode

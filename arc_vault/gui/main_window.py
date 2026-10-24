@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, Qt, QUrl
+from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, QSize, Qt, QUrl
 from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -155,7 +155,11 @@ class MainWindow(QMainWindow):
         self.preview_panel.edit_external_requested.connect(self._start_external_editing)
         self.main_splitter.addWidget(self.preview_panel)
 
-        self.main_splitter.setSizes([220, 580, 380])
+        self.main_splitter.setChildrenCollapsible(False)
+        self.sidebar.setMinimumWidth(180)
+        self.center_widget.setMinimumWidth(320)
+        self.preview_panel.setMinimumWidth(260)
+        self.main_splitter.setSizes([220, 560, 340])
         self.setCentralWidget(self.main_splitter)
 
         self._build_toolbar()
@@ -167,6 +171,7 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar("Main Toolbar", self)
         self.toolbar.setMovable(False)
+        self.toolbar.setIconSize(QSize(20, 20))
         self.addToolBar(self.toolbar)
 
         self.act_add_files = QAction("Add Files", self)
@@ -231,16 +236,16 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(qss)
         IconProvider.clear_cache()
 
-        self.act_add_files.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=18))
-        self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=18))
-        self.act_export.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=18))
-        self.act_delete.setIcon(IconProvider.get_icon("trash", dark_mode=self.dark_mode, size=18))
-        self.act_lock.setIcon(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=18))
-        self.act_logs.setIcon(IconProvider.get_icon("logs", dark_mode=self.dark_mode, size=18))
+        self.act_add_files.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=20))
+        self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=20))
+        self.act_export.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=20))
+        self.act_delete.setIcon(IconProvider.get_icon("trash", dark_mode=self.dark_mode, size=20))
+        self.act_lock.setIcon(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=20))
+        self.act_logs.setIcon(IconProvider.get_icon("logs", dark_mode=self.dark_mode, size=20))
         self.act_theme.setIcon(
-            IconProvider.get_icon("sun" if self.dark_mode else "moon", dark_mode=self.dark_mode, size=18)
+            IconProvider.get_icon("sun" if self.dark_mode else "moon", dark_mode=self.dark_mode, size=20)
         )
-        self.act_preview_toggle.setIcon(IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=18))
+        self.act_preview_toggle.setIcon(IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=20))
 
         self.sidebar.set_theme(self.dark_mode)
         self.breadcrumbs.set_theme(self.dark_mode)
@@ -255,8 +260,16 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def _toggle_preview_panel(self) -> None:
-        if self.preview_panel.isHidden():
+        sizes = self.main_splitter.sizes()
+        is_collapsed = len(sizes) > 2 and sizes[2] < 50
+        if self.preview_panel.isHidden() or is_collapsed:
             self.preview_panel.show()
+            if is_collapsed:
+                sb_w = sizes[0] if sizes[0] > 100 else 220
+                preview_w = 340
+                total = sum(sizes) if sum(sizes) > 600 else self.main_splitter.width()
+                center_w = max(260, total - sb_w - preview_w)
+                self.main_splitter.setSizes([sb_w, center_w, preview_w])
         else:
             self.preview_panel.hide()
 
@@ -425,6 +438,19 @@ class MainWindow(QMainWindow):
             self.preview_panel.set_empty()
             return
 
+        # Ensure preview panel is visible and expanded
+        if self.preview_panel.isHidden():
+            self.preview_panel.show()
+        sizes = self.main_splitter.sizes()
+        if len(sizes) > 2 and sizes[2] < 50:
+            sb_w = sizes[0] if sizes[0] > 100 else 220
+            preview_w = 340
+            total = sum(sizes) if sum(sizes) > 600 else self.main_splitter.width()
+            center_w = max(260, total - sb_w - preview_w)
+            self.main_splitter.setSizes([sb_w, center_w, preview_w])
+
+        self.preview_panel.show_card_only(item, status_note="Extracting preview...")
+
         self._preview_worker = ExtractPreviewWorker(self.vault, item.entry_point_name, item.path)
         self._preview_worker.finished.connect(
             lambda path, err, it=item: self._on_preview_extracted(it, path, err)
@@ -435,7 +461,8 @@ class MainWindow(QMainWindow):
         if local_path and local_path.exists():
             self.preview_panel.show_preview(item, local_path)
         else:
-            self.preview_panel.set_empty()
+            note = err if err else ("File exceeds 1GB preview threshold." if item.size > 1024 * 1024 * 1024 else "Preview unavailable.")
+            self.preview_panel.show_card_only(item, status_note=note)
 
     def _on_file_double_clicked(self, item: ArchiveItem) -> None:
         if item.category == FileCategory.ENTRY_POINT or (not self.active_entry_point and item.is_dir):
@@ -947,6 +974,13 @@ class MainWindow(QMainWindow):
             if self.config.splitter_state and hasattr(self, 'main_splitter'):
                 split_bytes = QByteArray.fromBase64(self.config.splitter_state.encode('ascii'))
                 self.main_splitter.restoreState(split_bytes)
+                sizes = self.main_splitter.sizes()
+                if len(sizes) >= 3 and sizes[2] < 100:
+                    sb_w = max(180, sizes[0])
+                    preview_w = 340
+                    total = sum(sizes) if sum(sizes) > 600 else 1120
+                    center_w = max(260, total - sb_w - preview_w)
+                    self.main_splitter.setSizes([sb_w, center_w, preview_w])
         except Exception as e:
             print(f'[ArcVault] Failed to restore window state: {e}')
 
