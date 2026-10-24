@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
-from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, QPoint, QTimer, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
+from typing import Dict, List, Optional
+from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, QPoint, QSize, QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -32,6 +32,7 @@ class FileTableWidget(QTableWidget):
     internal_move_requested = pyqtSignal(str, list, object)  # (source_ep, item_paths, target_item)
     delete_pressed = pyqtSignal()
     enter_pressed = pyqtSignal()
+    zoom_requested = pyqtSignal(int)  # +1 (larger/onward) or -1 (smaller/backward)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -39,6 +40,7 @@ class FileTableWidget(QTableWidget):
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDragEnabled(True)
         self._drag_start_pos: Optional[QPoint] = None
+        self._zoom_delta_accum: float = 0.0
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -140,6 +142,36 @@ class FileTableWidget(QTableWidget):
 
         event.ignore()
 
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        modifiers = event.modifiers()
+        is_ctrl_held = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        if is_ctrl_held:
+            delta_y = event.angleDelta().y()
+            if delta_y == 0 and not event.pixelDelta().isNull():
+                delta_y = event.pixelDelta().y()
+
+            if delta_y != 0:
+                self._zoom_delta_accum += delta_y
+                threshold = 60.0
+                if self._zoom_delta_accum >= threshold:
+                    self._zoom_delta_accum = 0.0
+                    self.zoom_requested.emit(1)
+                    event.accept()
+                    return
+                elif self._zoom_delta_accum <= -threshold:
+                    self._zoom_delta_accum = 0.0
+                    self.zoom_requested.emit(-1)
+                    event.accept()
+                    return
+                else:
+                    event.accept()
+                    return
+            event.accept()
+            return
+
+        self._zoom_delta_accum = 0.0
+        super().wheelEvent(event)
+
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_pressed.emit()
@@ -173,6 +205,34 @@ class FileExplorerView(QWidget):
     COLUMNS_SEARCH = ["Name", "Location", "Size", "Type", "Modified", "Packed"]
     COLUMNS = COLUMNS_NORMAL
 
+    # 10 Predefined File List Sizes (5th size, index 4, is default)
+    # Sizes onward (> 4) are bigger; backward (< 4) are smaller
+    LIST_SIZES: List[Dict[str, int]] = [
+        {"row_height": 22, "icon_size": 14, "font_size": 10, "padding": 2},  # 1. Ultra Compact
+        {"row_height": 25, "icon_size": 15, "font_size": 11, "padding": 3},  # 2. Compact
+        {"row_height": 28, "icon_size": 16, "font_size": 11, "padding": 4},  # 3. Dense
+        {"row_height": 32, "icon_size": 17, "font_size": 12, "padding": 5},  # 4. Moderate
+        {"row_height": 36, "icon_size": 18, "font_size": 13, "padding": 6},  # 5. Default
+        {"row_height": 42, "icon_size": 22, "font_size": 13, "padding": 7},  # 6. Comfortable
+        {"row_height": 48, "icon_size": 26, "font_size": 14, "padding": 8},  # 7. Large
+        {"row_height": 56, "icon_size": 32, "font_size": 15, "padding": 9},  # 8. Extra Large
+        {"row_height": 64, "icon_size": 38, "font_size": 16, "padding": 10}, # 9. Huge
+        {"row_height": 74, "icon_size": 46, "font_size": 17, "padding": 12}, # 10. Giant / Maximum
+    ]
+    DEFAULT_SIZE_INDEX: int = 4  # 5th size is default
+
+    DEFAULT_COLUMN_WIDTHS: Dict[str, int] = {
+        "Name": 280,
+        "Location": 220,
+        "Size": 95,
+        "Type": 125,
+        "Modified": 145,
+        "Packed": 95,
+    }
+
+    list_size_changed = pyqtSignal(int)          # Emits new size_index (0..9)
+    column_widths_changed = pyqtSignal(dict)     # Emits updated {col_name: width_px}
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.dark_mode: bool = True
@@ -181,6 +241,8 @@ class FileExplorerView(QWidget):
         self.current_entry_point: str = ""
         self.current_subfolder: str = ""
         self.is_search_mode: bool = False
+        self.current_size_index: int = self.DEFAULT_SIZE_INDEX
+        self._column_widths: Dict[str, int] = dict(self.DEFAULT_COLUMN_WIDTHS)
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -236,23 +298,85 @@ class FileExplorerView(QWidget):
         self.table.drag_export_requested.connect(self.drag_export_requested.emit)
         self.table.delete_pressed.connect(self._on_delete_key)
         self.table.enter_pressed.connect(self._on_enter_key)
+        self.table.zoom_requested.connect(self._on_zoom_requested)
+        self.table.horizontalHeader().sectionResized.connect(self._on_header_section_resized)
 
         self.layout.addWidget(self.table)
 
     def _configure_table_headers(self) -> None:
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name
-        if self.is_search_mode:
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Location
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Size
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Modified
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Packed
-        else:
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Size
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Type
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Modified
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Packed
+        cols = self.COLUMNS_SEARCH if self.is_search_mode else self.COLUMNS_NORMAL
+
+        header.blockSignals(True)
+        for idx, col_name in enumerate(cols):
+            # QHeaderView.ResizeMode.Interactive enables user to horizontally resize Name, Size, Type, etc.
+            header.setSectionResizeMode(idx, QHeaderView.ResizeMode.Interactive)
+            width = self._column_widths.get(col_name, self.DEFAULT_COLUMN_WIDTHS.get(col_name, 100))
+            self.table.setColumnWidth(idx, width)
+
+        header.setStretchLastSection(True)
+        header.blockSignals(False)
+
+    def _on_header_section_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
+        cols = self.COLUMNS_SEARCH if self.is_search_mode else self.COLUMNS_NORMAL
+        if 0 <= logical_index < len(cols) and new_size > 20:
+            col_name = cols[logical_index]
+            self._column_widths[col_name] = new_size
+            self.column_widths_changed.emit(dict(self._column_widths))
+
+    def set_custom_column_widths(self, widths: Dict[str, int]) -> None:
+        if isinstance(widths, dict):
+            self._column_widths.update(widths)
+            self._configure_table_headers()
+
+    def _on_zoom_requested(self, direction: int) -> None:
+        new_index = self.current_size_index + direction
+        new_index = max(0, min(len(self.LIST_SIZES) - 1, new_index))
+        if new_index != self.current_size_index:
+            self.apply_list_size(new_index)
+
+    def apply_list_size(self, size_index: int) -> None:
+        self.current_size_index = max(0, min(len(self.LIST_SIZES) - 1, size_index))
+        cfg = self.LIST_SIZES[self.current_size_index]
+
+        self.table.setIconSize(QSize(cfg["icon_size"], cfg["icon_size"]))
+        self.table.verticalHeader().setDefaultSectionSize(cfg["row_height"])
+
+        font = self.table.font()
+        font.setPointSize(cfg["font_size"])
+        self.table.setFont(font)
+
+        for r in range(self.table.rowCount()):
+            self.table.setRowHeight(r, cfg["row_height"])
+            name_item = self.table.item(r, 0)
+            if name_item:
+                archive_item = name_item.data(Qt.ItemDataRole.UserRole)
+                if archive_item:
+                    icon = IconProvider.get_category_icon(
+                        archive_item.category,
+                        dark_mode=self.dark_mode,
+                        size=cfg["icon_size"],
+                    )
+                    name_item.setIcon(icon)
+
+        self.list_size_changed.emit(self.current_size_index)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        modifiers = event.modifiers()
+        is_ctrl_held = bool(modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
+        if is_ctrl_held:
+            delta_y = event.angleDelta().y()
+            if delta_y == 0 and not event.pixelDelta().isNull():
+                delta_y = event.pixelDelta().y()
+            if delta_y > 0:
+                self._on_zoom_requested(1)
+                event.accept()
+                return
+            elif delta_y < 0:
+                self._on_zoom_requested(-1)
+                event.accept()
+                return
+        super().wheelEvent(event)
 
     def set_location_context(self, entry_point_name: str, subfolder: str = "") -> None:
         self.current_entry_point = entry_point_name
@@ -356,17 +480,28 @@ class FileExplorerView(QWidget):
 
     def _render_table(self) -> None:
         cols = self.COLUMNS_SEARCH if self.is_search_mode else self.COLUMNS_NORMAL
-        self.table.setColumnCount(len(cols))
-        self.table.setHorizontalHeaderLabels(cols)
-        self._configure_table_headers()
+        if self.table.columnCount() != len(cols):
+            self.table.setColumnCount(len(cols))
+            self.table.setHorizontalHeaderLabels(cols)
+            self._configure_table_headers()
+
+        cfg = self.LIST_SIZES[self.current_size_index]
+        self.table.setIconSize(QSize(cfg["icon_size"], cfg["icon_size"]))
+        self.table.verticalHeader().setDefaultSectionSize(cfg["row_height"])
+        font = self.table.font()
+        font.setPointSize(cfg["font_size"])
+        self.table.setFont(font)
 
         self.table.setRowCount(len(self.displayed_items))
 
         for row, item in enumerate(self.displayed_items):
+            self.table.setRowHeight(row, cfg["row_height"])
+
             # Column 0: Name with Category Icon
             name_item = QTableWidgetItem(item.name)
-            icon = IconProvider.get_category_icon(item.category, dark_mode=self.dark_mode, size=18)
+            icon = IconProvider.get_category_icon(item.category, dark_mode=self.dark_mode, size=cfg["icon_size"])
             name_item.setIcon(icon)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             name_item.setData(Qt.ItemDataRole.UserRole, item)
 
             col_offset = 0
@@ -375,6 +510,7 @@ class FileExplorerView(QWidget):
                 loc_str = self._format_item_location(item)
                 loc_item = QTableWidgetItem(loc_str)
                 loc_item.setForeground(QColor("#38bdf8" if self.dark_mode else "#0284c7"))
+                loc_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row, 1, loc_item)
 
             # Size
@@ -385,10 +521,12 @@ class FileExplorerView(QWidget):
             # Type
             type_str = self._format_category_name(item.category)
             type_item = QTableWidgetItem(type_str)
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
             # Modified
             mod_str = item.modified or ""
             mod_item = QTableWidgetItem(mod_str)
+            mod_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
             # Packed Size
             packed_str = "" if item.is_dir else format_size(item.packed_size)

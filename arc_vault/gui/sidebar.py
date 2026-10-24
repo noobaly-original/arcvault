@@ -143,7 +143,7 @@ class VaultSidebar(QWidget):
 
         # Section: Entry Points (Root .7z Archives)
         ep_header = QHBoxLayout()
-        lbl_ep = QLabel("ENTRY POINTS (.7Z)", self)
+        lbl_ep = QLabel("ENTRY POINTS", self)
         lbl_ep.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 1px;")
         ep_header.addWidget(lbl_ep)
         ep_header.addStretch()

@@ -140,6 +140,8 @@ class MainWindow(QMainWindow):
         self.file_view.internal_move_requested.connect(self._on_internal_move_requested)
         self.file_view.search_requested.connect(self._on_search_requested)
         self.file_view.reveal_requested.connect(self._on_reveal_in_vault)
+        self.file_view.list_size_changed.connect(self._on_list_size_changed)
+        self.file_view.column_widths_changed.connect(self._on_column_widths_changed)
 
         self.find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self.find_shortcut.activated.connect(self._focus_search_bar)
@@ -1059,6 +1061,11 @@ class MainWindow(QMainWindow):
                     total = sum(sizes) if sum(sizes) > 600 else 1120
                     center_w = max(260, total - sb_w - preview_w)
                     self.main_splitter.setSizes([sb_w, center_w, preview_w])
+
+            if hasattr(self.config, "file_list_size_index") and self.config.file_list_size_index is not None:
+                self.file_view.apply_list_size(self.config.file_list_size_index)
+            if hasattr(self.config, "file_column_widths") and self.config.file_column_widths:
+                self.file_view.set_custom_column_widths(self.config.file_column_widths)
         except Exception as e:
             print(f'[ArcVault] Failed to restore window state: {e}')
 
@@ -1078,6 +1085,18 @@ class MainWindow(QMainWindow):
             self.config.save()
         except Exception as e:
             print(f'[ArcVault] Failed to save window state: {e}')
+
+    def _on_list_size_changed(self, size_index: int) -> None:
+        self.config.file_list_size_index = size_index
+        self.config.save()
+        label = f"Size {size_index + 1}/10"
+        if size_index == 4:
+            label += " (Default)"
+        self.statusBar().showMessage(f"File list zoom: {label}", 1500)
+
+    def _on_column_widths_changed(self, widths: dict) -> None:
+        self.config.file_column_widths = widths
+        self.config.save()
 
     def closeEvent(self, event) -> None:
         self._save_window_state()

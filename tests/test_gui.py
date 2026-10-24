@@ -11,7 +11,9 @@ from unittest.mock import MagicMock, patch
 # Force headless offscreen platform for Qt
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtWidgets import QApplication, QHeaderView, QLabel
 
 from arc_vault.config import AppConfig
 from arc_vault.core.models import ArchiveItem, FileCategory
@@ -392,6 +394,139 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertFalse(view.is_search_mode)
         self.assertEqual(view.table.columnCount(), 5)
         self.assertEqual(view.table.horizontalHeaderItem(1).text(), "Size")
+
+    def test_horizontal_column_resizing(self) -> None:
+        """Verify columns are in Interactive mode allowing horizontal drag resizing and custom widths."""
+        view = FileExplorerView()
+        header = view.table.horizontalHeader()
+
+        # All columns in normal mode must be Interactive
+        for col_idx in range(view.table.columnCount()):
+            self.assertEqual(
+                header.sectionResizeMode(col_idx),
+                QHeaderView.ResizeMode.Interactive,
+                f"Column {col_idx} should be Interactive for horizontal resizing",
+            )
+
+        # Test custom column width application
+        view.set_custom_column_widths({"Name": 320, "Size": 110, "Type": 140})
+        self.assertEqual(view.table.columnWidth(0), 320)
+        self.assertEqual(view.table.columnWidth(1), 110)
+        self.assertEqual(view.table.columnWidth(2), 140)
+
+        # Check sectionResized event updates saved column widths and emits signal
+        emitted_widths = []
+        view.column_widths_changed.connect(lambda w: emitted_widths.append(w))
+        view._on_header_section_resized(0, 320, 400)
+        self.assertEqual(view._column_widths["Name"], 400)
+        self.assertTrue(len(emitted_widths) > 0)
+        self.assertEqual(emitted_widths[-1]["Name"], 400)
+
+    def test_ten_predefined_file_list_sizes(self) -> None:
+        """Verify 10 predefined sizes (5th/index 4 is default, <4 smaller, >4 bigger)."""
+        view = FileExplorerView()
+        self.assertEqual(len(view.LIST_SIZES), 10)
+        self.assertEqual(view.DEFAULT_SIZE_INDEX, 4)
+        self.assertEqual(view.current_size_index, 4)
+
+        default_height = view.LIST_SIZES[4]["row_height"]
+        self.assertEqual(default_height, 36)
+
+        # Sizes backward (< 4) must be strictly smaller
+        for i in range(4):
+            self.assertLess(view.LIST_SIZES[i]["row_height"], default_height)
+
+        # Sizes onward (> 4) must be strictly bigger
+        for i in range(5, 10):
+            self.assertGreater(view.LIST_SIZES[i]["row_height"], default_height)
+
+        # Test applying size 0 (smallest)
+        view.apply_list_size(0)
+        self.assertEqual(view.current_size_index, 0)
+        self.assertEqual(view.table.verticalHeader().defaultSectionSize(), 22)
+
+        # Test applying size 9 (largest)
+        view.apply_list_size(9)
+        self.assertEqual(view.current_size_index, 9)
+        self.assertEqual(view.table.verticalHeader().defaultSectionSize(), 74)
+
+        # Test clamping out of bounds
+        view.apply_list_size(-5)
+        self.assertEqual(view.current_size_index, 0)
+        view.apply_list_size(99)
+        self.assertEqual(view.current_size_index, 9)
+
+    def test_control_scroll_and_trackpad_zoom_gestures(self) -> None:
+        """Verify Ctrl + mouse wheel and trackpad vertical motion adjust file list size."""
+        view = FileExplorerView()
+        view.apply_list_size(4)  # Start at default 5th size (index 4)
+
+        # 1. Ctrl + Wheel scroll up -> zoom in (+1 size)
+        wheel_up = QWheelEvent(
+            QPointF(20, 20),
+            QPointF(20, 20),
+            QPoint(0, 0),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.ControlModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        view.table.wheelEvent(wheel_up)
+        self.assertEqual(view.current_size_index, 5)
+
+        # 2. Ctrl + Wheel scroll down -> zoom out (-1 size)
+        wheel_down = QWheelEvent(
+            QPointF(20, 20),
+            QPointF(20, 20),
+            QPoint(0, 0),
+            QPoint(0, -120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.ControlModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        view.table.wheelEvent(wheel_down)
+        self.assertEqual(view.current_size_index, 4)
+
+        # 3. Trackpad two-hand/finger vertical motion (accumulated delta > 60)
+        for _ in range(3):
+            tp_event = QWheelEvent(
+                QPointF(20, 20),
+                QPointF(20, 20),
+                QPoint(0, 5),
+                QPoint(0, 25),  # 3 * 25 = 75 > 60
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.ControlModifier,
+                Qt.ScrollPhase.ScrollUpdate,
+                False,
+            )
+            view.table.wheelEvent(tp_event)
+        self.assertEqual(view.current_size_index, 5)
+
+    def test_sidebar_entry_points_label_and_persistence(self) -> None:
+        """Verify sidebar section title is ENTRY POINTS (without (.7z)) and config persists zoom & widths."""
+        cfg_file = self.root_path / "test_config.json"
+        config = AppConfig(cfg_file)
+        sidebar = VaultSidebar(config)
+
+        # Check section labels
+        labels = [lbl.text() for lbl in sidebar.findChildren(QLabel)]
+        self.assertIn("ENTRY POINTS", labels)
+        for text in labels:
+            self.assertNotIn("(.7Z)", text)
+            self.assertNotIn("(.7z)", text)
+
+        # Check config persistence of file list size index and column widths
+        config.file_list_size_index = 7
+        config.file_column_widths = {"Name": 350, "Size": 120}
+        config.save()
+
+        # Reload from disk
+        config_reloaded = AppConfig(cfg_file)
+        self.assertEqual(config_reloaded.file_list_size_index, 7)
+        self.assertEqual(config_reloaded.file_column_widths["Name"], 350)
+        self.assertEqual(config_reloaded.file_column_widths["Size"], 120)
 
 if __name__ == "__main__":
     unittest.main()

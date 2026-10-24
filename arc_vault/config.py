@@ -30,6 +30,8 @@ class AppConfig:
         self.window_x: Optional[int] = None
         self.window_y: Optional[int] = None
         self.splitter_state: Optional[str] = None
+        self.file_list_size_index: int = 4
+        self.file_column_widths: Optional[Dict[str, int]] = None
 
         self.load()
 
@@ -55,6 +57,8 @@ class AppConfig:
             self.window_x = data.get("window_x")
             self.window_y = data.get("window_y")
             self.splitter_state = data.get("splitter_state")
+            self.file_list_size_index = max(0, min(9, int(data.get("file_list_size_index", 4))))
+            self.file_column_widths = data.get("file_column_widths")
         except Exception:
             # Fall back to defaults if corrupted
             pass
@@ -76,6 +80,8 @@ class AppConfig:
                 "window_x": self.window_x,
                 "window_y": self.window_y,
                 "splitter_state": self.splitter_state,
+                "file_list_size_index": self.file_list_size_index,
+                "file_column_widths": self.file_column_widths,
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
