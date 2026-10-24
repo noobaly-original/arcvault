@@ -618,9 +618,11 @@ class FileExplorerView(QWidget):
     def _show_context_menu(self, pos) -> None:
         menu = QMenu(self)
         items = self.get_selected_items()
+        is_vault_root = (not self.current_entry_point and not self.is_search_mode)
 
         if items:
             first = items[0]
+            is_entry_point = (first.category == FileCategory.ENTRY_POINT or is_vault_root)
             is_over_1gb = (first.size > 1024 * 1024 * 1024)
 
             if self.is_search_mode:
@@ -629,7 +631,11 @@ class FileExplorerView(QWidget):
                 reveal_act.triggered.connect(lambda: self.reveal_requested.emit(first))
                 menu.addSeparator()
 
-            if first.is_dir:
+            if is_entry_point:
+                open_act = menu.addAction("Open Entry Point")
+                open_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
+                open_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
+            elif first.is_dir:
                 open_act = menu.addAction("Open Folder")
                 open_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
                 open_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
@@ -651,9 +657,12 @@ class FileExplorerView(QWidget):
                     edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
 
             menu.addSeparator()
-            move_act = menu.addAction("Move to Folder...")
-            move_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
-            move_act.triggered.connect(lambda: self.move_requested.emit(items))
+
+            # "Move to Folder..." is only available inside archives, not for top-level Entry Points
+            if not is_entry_point:
+                move_act = menu.addAction("Move to Folder...")
+                move_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
+                move_act.triggered.connect(lambda: self.move_requested.emit(items))
 
             export_act = menu.addAction("Export / Save As...")
             export_act.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=16))
@@ -668,12 +677,17 @@ class FileExplorerView(QWidget):
             delete_act.triggered.connect(lambda: self.delete_requested.emit(items))
             menu.addSeparator()
 
-        add_files_act = menu.addAction("Add Files Here...")
-        add_files_act.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=16))
-        add_files_act.triggered.connect(self.add_files_requested.emit)
+        if is_vault_root:
+            new_ep_act = menu.addAction("New Entry Point...")
+            new_ep_act.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=16))
+            new_ep_act.triggered.connect(self.create_folder_requested.emit)
+        else:
+            add_files_act = menu.addAction("Add Files Here...")
+            add_files_act.setIcon(IconProvider.get_icon("add_file", dark_mode=self.dark_mode, size=16))
+            add_files_act.triggered.connect(self.add_files_requested.emit)
 
-        new_folder_act = menu.addAction("New Folder...")
-        new_folder_act.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=16))
-        new_folder_act.triggered.connect(self.create_folder_requested.emit)
+            new_folder_act = menu.addAction("New Folder...")
+            new_folder_act.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=16))
+            new_folder_act.triggered.connect(self.create_folder_requested.emit)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))

@@ -528,5 +528,88 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertEqual(config_reloaded.file_column_widths["Name"], 350)
         self.assertEqual(config_reloaded.file_column_widths["Size"], 120)
 
+    def test_vault_root_context_menu_options(self) -> None:
+        """Verify Vault Root context menu has no 'Move to Folder...', and shows 'New Entry Point...'."""
+        from PyQt6.QtWidgets import QMenu
+        view = FileExplorerView()
+        # 1. At Vault Root with an Entry Point selected
+        view.set_location_context("", "")
+        ep_item = ArchiveItem(
+            name="photos",
+            path="photos",
+            is_dir=True,
+            category=FileCategory.ENTRY_POINT,
+            entry_point_name="photos",
+        )
+        view.set_items([ep_item])
+        view.table.selectRow(0)
+
+        captured_actions = []
+        def fake_exec(self_menu, *args, **kwargs):
+            captured_actions.extend([a.text() for a in self_menu.actions() if a.text()])
+
+        with patch.object(QMenu, "exec", fake_exec):
+            view._show_context_menu(QPoint(5, 5))
+
+        self.assertNotIn("Move to Folder...", captured_actions)
+        self.assertNotIn("Add Files Here...", captured_actions)
+        self.assertIn("Export / Save As...", captured_actions)
+        self.assertIn("Open Entry Point", captured_actions)
+        self.assertIn("New Entry Point...", captured_actions)
+
+        # 2. Inside a subfolder
+        view.set_location_context("photos", "family")
+        sub_item = ArchiveItem(
+            name="beach.png",
+            path="family/beach.png",
+            is_dir=False,
+            category=FileCategory.IMAGE,
+            entry_point_name="photos",
+        )
+        view.set_items([sub_item])
+        view.table.selectRow(0)
+
+        sub_actions = []
+        def fake_exec_sub(self_menu, *args, **kwargs):
+            sub_actions.extend([a.text() for a in self_menu.actions() if a.text()])
+
+        with patch.object(QMenu, "exec", fake_exec_sub):
+            view._show_context_menu(QPoint(5, 5))
+
+        self.assertIn("Move to Folder...", sub_actions)
+        self.assertIn("Add Files Here...", sub_actions)
+        self.assertIn("New Folder...", sub_actions)
+
+    def test_export_files_worker_with_entry_points(self) -> None:
+        """Verify ExportFilesWorker correctly exports entire entry point to destination folder."""
+        from arc_vault.gui.workers import ExportFilesWorker
+
+        vault_dir = self.root_path / "WorkerExportVault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Worker Vault",
+            password="TestPassword123!",
+            initial_entry_points=["docs"],
+        )
+        sample = self.root_path / "hello.txt"
+        sample.write_text("hello export worker", encoding="utf-8")
+        vault.add_files("docs", [sample])
+
+        dest_dir = self.root_path / "exported_worker_output"
+        ep_item = ArchiveItem(
+            name="docs",
+            path="docs",
+            is_dir=True,
+            category=FileCategory.ENTRY_POINT,
+            entry_point_name="docs",
+        )
+
+        worker = ExportFilesWorker(vault, [ep_item], dest_dir)
+        worker.run()
+
+        exported_file = dest_dir / "docs" / "hello.txt"
+        self.assertTrue(exported_file.is_file())
+        self.assertEqual(exported_file.read_text(encoding="utf-8"), "hello export worker")
+
 if __name__ == "__main__":
     unittest.main()

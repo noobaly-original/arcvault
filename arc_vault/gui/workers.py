@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from arc_vault.core.models import ArchiveItem
+from arc_vault.core.models import ArchiveItem, FileCategory
 from arc_vault.core.vault import Vault
 
 
@@ -168,26 +168,63 @@ class ExtractPreviewWorker(QThread):
 
 
 class ExportFilesWorker(QThread):
-    """Worker thread to export files from archive to local directory."""
+    """Worker thread to export files or entire entry points to local directory."""
 
     finished = pyqtSignal(bool, str)
 
     def __init__(
         self,
         vault: Vault,
-        entry_point_name: str,
-        internal_paths: List[str],
-        dest_dir: Path,
+        entry_point_name_or_items: Any,
+        internal_paths_or_dest: Any = None,
+        dest_dir: Optional[Path] = None,
+        active_entry_point: str = "",
     ) -> None:
         super().__init__()
         self.vault = vault
-        self.entry_point_name = entry_point_name
-        self.internal_paths = internal_paths
-        self.dest_dir = dest_dir
+        self.active_entry_point = active_entry_point
+
+        if isinstance(entry_point_name_or_items, list) and isinstance(internal_paths_or_dest, Path):
+            # Signature: (vault, items: List[ArchiveItem], dest_dir: Path)
+            self.items: Optional[List[ArchiveItem]] = entry_point_name_or_items
+            self.dest_dir: Path = internal_paths_or_dest
+            self.entry_point_name: str = ""
+            self.internal_paths: List[str] = []
+        else:
+            # Signature: (vault, entry_point_name: str, internal_paths: List[str], dest_dir: Path)
+            self.items = None
+            self.entry_point_name = str(entry_point_name_or_items)
+            self.internal_paths = internal_paths_or_dest or []
+            self.dest_dir = dest_dir if dest_dir else Path.home()
 
     def run(self) -> None:
         try:
-            ok = self.vault.export_items(self.entry_point_name, self.internal_paths, self.dest_dir)
-            self.finished.emit(ok, "" if ok else "Extraction failed.")
+            if self.items is not None:
+                all_ok = True
+                # 1. Process whole entry points
+                ep_items = [it for it in self.items if it.category == FileCategory.ENTRY_POINT]
+                for ep_it in ep_items:
+                    ep_name = ep_it.entry_point_name or ep_it.name
+                    target = self.dest_dir if self.dest_dir.name == ep_name else (self.dest_dir / ep_name)
+                    if not self.vault.export_entry_point(ep_name, target):
+                        all_ok = False
+
+                # 2. Process regular items (grouped by entry_point_name)
+                regular_items = [it for it in self.items if it.category != FileCategory.ENTRY_POINT]
+                if regular_items:
+                    ep_groups: Dict[str, List[str]] = {}
+                    for it in regular_items:
+                        ep = it.entry_point_name or self.active_entry_point
+                        if ep:
+                            ep_groups.setdefault(ep, []).append(it.path)
+
+                    for ep, paths in ep_groups.items():
+                        if not self.vault.export_items(ep, paths, self.dest_dir):
+                            all_ok = False
+
+                self.finished.emit(all_ok, "" if all_ok else "One or more items could not be exported.")
+            else:
+                ok = self.vault.export_items(self.entry_point_name, self.internal_paths, self.dest_dir)
+                self.finished.emit(ok, "" if ok else "Extraction failed.")
         except Exception as e:
             self.finished.emit(False, str(e))

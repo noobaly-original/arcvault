@@ -873,11 +873,10 @@ class MainWindow(QMainWindow):
             return
 
         dest_path = Path(dest)
-        internal_paths = [i.path for i in items]
-        ep_name = items[0].entry_point_name or self.active_entry_point
-
-        self.status_bar.showMessage(f"Decrypting and exporting {len(items)} items...")
-        self._export_worker = ExportFilesWorker(self.vault, ep_name, internal_paths, dest_path)
+        self.status_bar.showMessage(f"Decrypting and exporting {len(items)} item(s)...")
+        self._export_worker = ExportFilesWorker(
+            self.vault, items, dest_path, active_entry_point=self.active_entry_point
+        )
         self._export_worker.finished.connect(self._on_export_finished)
         self._export_worker.start()
 

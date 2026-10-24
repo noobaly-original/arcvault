@@ -434,5 +434,45 @@ class TestArcVaultBackend(unittest.TestCase):
         res_non_rec = vault.search_items("finance", entry_point_name="documents", subfolder_prefix="work", recursive=False)
         self.assertEqual(len(res_non_rec), 0)
 
+    def test_export_entire_entry_point(self) -> None:
+        """Verify exporting an entire entry point extracts all nested files and subfolders accurately."""
+        vault_dir = self.root_path / "export_test_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Export Vault",
+            password=self.password,
+            initial_entry_points=["my_archive"],
+            sevenzip=self.sz,
+        )
+
+        # Add root file and nested file in subfolder
+        f1 = self.root_path / "doc.txt"
+        f1.write_text("root file content", encoding="utf-8")
+        vault.add_files("my_archive", [f1], subfolder="")
+
+        f2 = self.root_path / "nested.png"
+        f2.write_bytes(b"nested image data")
+        vault.add_files("my_archive", [f2], subfolder="graphics/2026")
+
+        # 1. Test vault.export_entry_point directly
+        dest_dir1 = self.root_path / "exported_ep1"
+        ok1 = vault.export_entry_point("my_archive", dest_dir1)
+        self.assertTrue(ok1)
+        self.assertTrue((dest_dir1 / "doc.txt").is_file())
+        self.assertEqual((dest_dir1 / "doc.txt").read_text(encoding="utf-8"), "root file content")
+        self.assertTrue((dest_dir1 / "graphics" / "2026" / "nested.png").is_file())
+        self.assertEqual((dest_dir1 / "graphics" / "2026" / "nested.png").read_bytes(), b"nested image data")
+
+        # 2. Test vault.export_items with ["my_archive"] as path (as sent when in Vault Root)
+        dest_dir2 = self.root_path / "exported_ep2"
+        ok2 = vault.export_items("my_archive", ["my_archive"], dest_dir2)
+        self.assertTrue(ok2)
+        # Should create dest_dir2 / my_archive / ...
+        target_sub = dest_dir2 / "my_archive"
+        self.assertTrue(target_sub.is_dir())
+        self.assertTrue((target_sub / "doc.txt").is_file())
+        self.assertEqual((target_sub / "doc.txt").read_text(encoding="utf-8"), "root file content")
+        self.assertTrue((target_sub / "graphics" / "2026" / "nested.png").is_file())
+
 if __name__ == "__main__":
     unittest.main()

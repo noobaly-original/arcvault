@@ -933,20 +933,62 @@ class Vault:
             if tmp_path.exists():
                 tmp_path.unlink()
 
+    def export_entry_point(self, entry_point_name: str, dest_dir: Path) -> bool:
+        """Export an entire entry point and all its subfolders/files into dest_dir."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        if entry_point_name not in self.entry_points:
+            raise ValueError(f"Entry point '{entry_point_name}' not found.")
+
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        all_ok = True
+        for p, item in meta.items.items():
+            clean_p = p.strip("/").replace("\\", "/")
+            target_path = dest_dir / clean_p
+            if item.is_dir:
+                target_path.mkdir(parents=True, exist_ok=True)
+            else:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                item_dir = ep_data_dir / item.item_id
+                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_path):
+                    all_ok = False
+
+        log_info(f"Exported entire entry point '{entry_point_name}' ({len(meta.items)} items) to {dest_dir}")
+        return all_ok
+
     def export_items(self, entry_point_name: str, internal_paths: List[str], dest_dir: Path) -> bool:
         """Export selected items from V2 entry point, reassembling any shredded chunks."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        meta = self._v2_metadata[entry_point_name]
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+
+        clean_paths = [p.strip("/").replace("\\", "/") for p in internal_paths]
+        # If internal_paths is empty or specifies the entry point root/itself:
+        if not internal_paths or "" in clean_paths or entry_point_name in clean_paths:
+            target_dir = dest_dir if dest_dir.name == entry_point_name else (dest_dir / entry_point_name)
+            return self.export_entry_point(entry_point_name, target_dir)
+
         ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        targets = internal_paths if internal_paths else list(meta.items.keys())
+        targets = clean_paths
         all_ok = True
 
-        for p in targets:
-            clean_p = p.strip("/").replace("\\", "/")
+        for clean_p in targets:
             item = meta.items.get(clean_p)
             if not item:
                 continue
