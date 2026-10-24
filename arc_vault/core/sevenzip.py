@@ -231,8 +231,6 @@ class SevenZip:
         if not source_paths:
             return True
 
-        # When adding into an archive_subfolder, we can organize files in a temporary structure
-        # or use relative working directory to preserve folder hierarchy cleanly.
         if archive_subfolder:
             norm_sub = archive_subfolder.strip("/").replace("\\", "/")
             with tempfile.TemporaryDirectory() as staging_dir:
@@ -259,6 +257,33 @@ class SevenZip:
             )
             return res.returncode == 0
 
+    def update_single_file(
+        self,
+        archive_path: Path,
+        local_source_file: Path,
+        internal_path: str,
+        password: str,
+    ) -> bool:
+        """
+        Quickly and reliably update an existing file inside the 7z archive.
+        Uses 7-Zip 'u' (update) command with staging to guarantee accurate internal path.
+        """
+        if not local_source_file.exists() or not archive_path.exists():
+            return False
+
+        norm_internal = internal_path.strip("/").replace("\\", "/")
+        with tempfile.TemporaryDirectory(prefix="arcvault_edit_") as stage_dir:
+            stage_path = Path(stage_dir) / norm_internal
+            stage_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(local_source_file, stage_path)
+
+            # Run 7z update command
+            res = self._run(
+                ["u", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), norm_internal],
+                cwd=Path(stage_dir),
+            )
+            return res.returncode == 0
+
     def create_subfolder_in_archive(
         self,
         archive_path: Path,
@@ -270,7 +295,6 @@ class SevenZip:
         with tempfile.TemporaryDirectory() as tmp_dir:
             dummy_dir = Path(tmp_dir) / norm_path
             dummy_dir.mkdir(parents=True, exist_ok=True)
-            # Create a tiny hidden placeholder so 7z writes the folder structure
             keep_file = dummy_dir / ".keep"
             keep_file.write_text("", encoding="utf-8")
 
@@ -278,7 +302,6 @@ class SevenZip:
                 ["a", f"-p{password}", "-mhe=on", "-mx=5", "-r", "-y", str(archive_path.resolve()), norm_path],
                 cwd=Path(tmp_dir),
             )
-            # Remove the placeholder file leaving the folder entry
             self._run(["d", f"-p{password}", "-mhe=on", "-y", str(archive_path.resolve()), f"{norm_path}/.keep"])
             return res.returncode == 0
 
@@ -291,14 +314,12 @@ class SevenZip:
     ) -> Optional[Path]:
         """Extract a single file without directory recursion into dest_dir for preview."""
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # Use 'e' (extract without directory paths)
         res = self._run(
             ["e", f"-p{password}", f"-o{str(dest_dir.resolve())}", "-y", str(archive_path.resolve()), internal_path]
         )
         if res.returncode != 0:
             return None
 
-        # Check extracted file
         filename = Path(internal_path).name
         target = dest_dir / filename
         return target if target.exists() else None

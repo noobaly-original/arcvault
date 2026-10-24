@@ -1,6 +1,6 @@
 # 🛡️ ArcVault
 
-**ArcVault** is a fast, lightweight, and cross-platform encrypted archive explorer and vault utility.
+**ArcVault** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
 
 Unlike traditional vault systems (such as Cryptomator) that rely on kernel virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **ArcVault** takes a clean, file-centric approach:
 - Your vault is simply a standard folder on your disk.
@@ -13,6 +13,14 @@ Unlike traditional vault systems (such as Cryptomator) that rely on kernel virtu
 
 - **Blazing Fast & Lightweight**: Zero background mount daemons, zero kernel drivers.
 - **AES-256 Header Encryption**: All archive headers (`-mhe=on`) are encrypted. File names and directory hierarchies cannot be seen without the master password.
+- **Fast & Reliable Archive Editing**:
+  - **In-App Direct Editing**: Edit text, notes, JSON, scripts, and code files directly in the preview panel with `Save` (Ctrl+S / Cmd+S). The app immediately stages and updates the `.7z` archive using 7-Zip's multithreaded fast update engine.
+  - **External Editor Auto-Sync**: Right-click any file and select *Edit in External App...* (or click the button in Preview). ArcVault extracts the file to a secure watched staging area with `QFileSystemWatcher`. Whenever you hit save in your external editor (VS Code, TextEdit, Notepad, GIMP, etc.), ArcVault detects the change and automatically re-encrypts the updated file back into the `.7z` archive!
+- **Cross-Platform Drag-and-Drop**:
+  - **Drop onto Folders**: Dragging external files from Finder / Explorer and dropping them directly onto a subfolder row in the table automatically encrypts and adds them into that specific nested directory.
+  - **Drop onto Sidebar Entry Points**: Drag files directly onto any `.7z` archive listed in the sidebar to add them to that entry point.
+  - **Vault Root Drop Routing**: Dropping files at the vault root allows instant selection or creation of an entry point.
+  - **Drag to Export**: Click and drag any file or group of files from ArcVault out to your Desktop or Finder to automatically decrypt and export them.
 - **Entry-Point Vault Architecture**:
   - The vault root houses encrypted category entry points (`photos.7z`, `documents.7z`, etc.).
   - Navigating into an entry point seamlessly explores all nested directories and files inside.
@@ -27,7 +35,6 @@ Unlike traditional vault systems (such as Cryptomator) that rely on kernel virtu
   - Dual-mode theme engine with instant **Light Mode** and **Dark Mode** toggle.
   - Interactive breadcrumb navigation bar (`Vault Root › photos › family`).
   - Real-time search and filter bar.
-  - Drag-and-drop file import (drag files directly into the active folder to encrypt them).
 - **Cryptomator-Style Vault Switcher**:
   - Easily manage, add, create, or switch between multiple vaults in the left sidebar.
   - Secure in-memory password caching during session (purged immediately on Lock or App Close).
@@ -97,7 +104,7 @@ You can double-click `photos.7z` in Finder or Explorer, type your password in 7-
 
 ## 🧪 Running Tests
 
-The test suite covers backend encryption, password validation, archive manipulations, and headless GUI components:
+The test suite covers backend encryption, fast archive editing, password validation, archive manipulations, and headless GUI components:
 
 ```bash
 python3 -m unittest discover tests

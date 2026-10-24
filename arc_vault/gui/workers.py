@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from arc_vault.core.models import ArchiveItem
@@ -75,6 +75,39 @@ class AddFilesWorker(QThread):
                 self.finished.emit(True, "")
             else:
                 self.finished.emit(False, "7-Zip failed to add files to archive.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+class UpdateFileWorker(QThread):
+    """Worker thread to update an existing file inside the 7z archive quickly."""
+
+    finished = pyqtSignal(bool, str)
+
+    def __init__(
+        self,
+        vault: Vault,
+        entry_point_name: str,
+        internal_path: str,
+        content_or_file: Union[str, bytes, Path],
+    ) -> None:
+        super().__init__()
+        self.vault = vault
+        self.entry_point_name = entry_point_name
+        self.internal_path = internal_path
+        self.content_or_file = content_or_file
+
+    def run(self) -> None:
+        try:
+            if isinstance(self.content_or_file, Path):
+                ok = self.vault.update_file_from_disk(
+                    self.entry_point_name, self.internal_path, self.content_or_file
+                )
+            else:
+                ok = self.vault.update_file_content(
+                    self.entry_point_name, self.internal_path, self.content_or_file
+                )
+            self.finished.emit(ok, "" if ok else "Failed to update archive.")
         except Exception as e:
             self.finished.emit(False, str(e))
 

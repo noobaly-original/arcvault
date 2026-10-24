@@ -1,4 +1,4 @@
-"""Left sidebar managing vault locations and entry-point archive list."""
+"""Left sidebar managing vault locations and entry-point archive list with drop support."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -28,6 +30,50 @@ from arc_vault.core.vault import Vault
 from arc_vault.gui.icons import IconProvider
 
 
+class DropListWidget(QListWidget):
+    """QListWidget supporting drag-and-drop of external files onto list items."""
+
+    files_dropped_on_item = pyqtSignal(list, object)  # (List[Path], QListWidgetItem)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if event.mimeData().hasUrls():
+            item = self.itemAt(event.position().toPoint())
+            if item:
+                self.setCurrentItem(item)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        urls = event.mimeData().urls()
+        file_paths: List[Path] = []
+        for u in urls:
+            local = u.toLocalFile()
+            if local:
+                p = Path(local)
+                if p.exists():
+                    file_paths.append(p)
+
+        if not file_paths:
+            event.ignore()
+            return
+
+        item = self.itemAt(event.position().toPoint())
+        self.files_dropped_on_item.emit(file_paths, item)
+        event.acceptProposedAction()
+
+
 class VaultSidebar(QWidget):
     """Sidebar providing vault switching and entry point archive navigation."""
 
@@ -40,6 +86,7 @@ class VaultSidebar(QWidget):
     create_entry_point_requested = pyqtSignal()
     rename_entry_point_requested = pyqtSignal(str)
     delete_entry_point_requested = pyqtSignal(str)
+    files_dropped_on_entry_point = pyqtSignal(list, str)  # (List[Path], ep_name)
 
     def __init__(self, config: AppConfig, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -108,9 +155,10 @@ class VaultSidebar(QWidget):
 
         self.layout.addLayout(ep_header)
 
-        # Entry points list
-        self.ep_list = QListWidget(self)
+        # Entry points list with drop support
+        self.ep_list = DropListWidget(self)
         self.ep_list.itemClicked.connect(self._on_ep_clicked)
+        self.ep_list.files_dropped_on_item.connect(self._on_ep_files_dropped)
         self.ep_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ep_list.customContextMenuRequested.connect(self._show_ep_context_menu)
         self.layout.addWidget(self.ep_list)
@@ -155,7 +203,6 @@ class VaultSidebar(QWidget):
         self.refresh_entry_points()
 
     def refresh_vaults_list(self) -> None:
-        """Populate the known vaults list."""
         self.vault_list.clear()
         selected_row = -1
 
@@ -184,7 +231,6 @@ class VaultSidebar(QWidget):
             self.vault_list.setCurrentRow(selected_row)
 
     def set_current_vault(self, vault: Optional[Vault]) -> None:
-        """Update display when active vault changes."""
         self.current_vault = vault
         self.refresh_vaults_list()
         self.refresh_entry_points()
@@ -206,13 +252,11 @@ class VaultSidebar(QWidget):
             self.btn_add_ep.setEnabled(False)
 
     def refresh_entry_points(self) -> None:
-        """Populate list of entry points in active unlocked vault."""
         self.ep_list.clear()
         if not self.current_vault or not self.current_vault.is_unlocked:
             return
 
         selected_row = -1
-        # Item 0: Vault Root
         root_item = QListWidgetItem("Vault Root (All Entries)")
         root_item.setIcon(IconProvider.get_icon("vault_unlocked", dark_mode=self.dark_mode, size=18))
         root_item.setData(Qt.ItemDataRole.UserRole, "")
@@ -220,7 +264,6 @@ class VaultSidebar(QWidget):
         if not self.active_entry_point:
             selected_row = 0
 
-        # Entry points
         for idx, (ep_name, ep) in enumerate(self.current_vault.entry_points.items(), start=1):
             item = QListWidgetItem(f"{ep_name}.7z")
             item.setIcon(IconProvider.get_icon("entry_point", dark_mode=self.dark_mode, size=18))
@@ -240,6 +283,13 @@ class VaultSidebar(QWidget):
             if item.data(Qt.ItemDataRole.UserRole) == ep_name:
                 self.ep_list.setCurrentRow(i)
                 break
+
+    def _on_ep_files_dropped(self, files: List[Path], item: Optional[QListWidgetItem]) -> None:
+        if not item:
+            return
+        ep_name = item.data(Qt.ItemDataRole.UserRole)
+        if ep_name:
+            self.files_dropped_on_entry_point.emit(files, ep_name)
 
     def _show_add_vault_menu(self) -> None:
         menu = QMenu(self)
@@ -293,7 +343,7 @@ class VaultSidebar(QWidget):
 
         ep_name = item.data(Qt.ItemDataRole.UserRole)
         if not ep_name:
-            return  # Root item
+            return
 
         menu = QMenu(self)
 

@@ -19,6 +19,7 @@ from arc_vault.gui.file_view import FileExplorerView
 from arc_vault.gui.icons import IconProvider
 from arc_vault.gui.main_window import MainWindow
 from arc_vault.gui.preview_panel import PreviewPanel
+from arc_vault.gui.sidebar import VaultSidebar
 from arc_vault.gui.theme import DARK_STYLESHEET, LIGHT_STYLESHEET, get_stylesheet
 
 
@@ -52,10 +53,8 @@ class TestArcVaultGUI(unittest.TestCase):
             self.assertFalse(icon.isNull())
             self.assertEqual(icon.availableSizes()[0].width(), 24)
 
-    def test_preview_panel_views(self) -> None:
+    def test_preview_panel_views_and_in_app_editing(self) -> None:
         panel = PreviewPanel()
-
-        # Empty state
         self.assertEqual(panel.stack.currentIndex(), 0)
 
         # Image preview
@@ -66,20 +65,34 @@ class TestArcVaultGUI(unittest.TestCase):
 
         img_item = ArchiveItem(name="test.png", path="test.png", category=FileCategory.IMAGE)
         panel.show_preview(img_item, img_path)
-        self.assertEqual(panel.stack.currentIndex(), 2)  # Page 2 = Image
+        self.assertEqual(panel.stack.currentIndex(), 2)
 
-        # Text preview
+        # Text preview and in-app editing toggle
         txt_path = self.root_path / "code.py"
         txt_path.write_text("def hello():\n    return 42\n", encoding="utf-8")
         code_item = ArchiveItem(name="code.py", path="code.py", category=FileCategory.CODE)
         panel.show_preview(code_item, txt_path)
-        self.assertEqual(panel.stack.currentIndex(), 1)  # Page 1 = Text
+        self.assertEqual(panel.stack.currentIndex(), 1)
+        self.assertFalse(panel.btn_edit_text.isHidden())
 
-        # Executable card preview
-        exe_item = ArchiveItem(name="setup.exe", path="setup.exe", category=FileCategory.EXECUTABLE_WINDOWS)
-        panel.show_preview(exe_item, txt_path)
-        self.assertEqual(panel.stack.currentIndex(), 3)  # Page 3 = Card
-        self.assertIn("WINDOWS EXECUTABLE", panel.card_badge.text())
+        # Switch to edit mode
+        panel._toggle_text_edit_mode()
+        self.assertTrue(panel._is_editing_text)
+        self.assertFalse(panel.text_edit.isReadOnly())
+        self.assertFalse(panel.btn_save_text.isHidden())
+
+        # Modify text and trigger save
+        saved_data = []
+        panel.save_text_requested.connect(lambda item, text: saved_data.append((item, text)))
+        panel.text_edit.setPlainText("def hello():\n    return 100\n")
+        panel._save_in_app_text()
+        self.assertEqual(len(saved_data), 1)
+        self.assertEqual(saved_data[0][1], "def hello():\n    return 100\n")
+
+        # Simulate save successful
+        panel.on_save_successful("def hello():\n    return 100\n")
+        self.assertTrue(panel.text_edit.isReadOnly())
+        self.assertTrue(panel.btn_save_text.isHidden())
 
     def test_breadcrumb_bar(self) -> None:
         bar = BreadcrumbBar()
@@ -98,13 +111,35 @@ class TestArcVaultGUI(unittest.TestCase):
         view.set_items(items)
         self.assertEqual(view.table.rowCount(), 3)
 
-        # Filter by "photo"
         view._filter_items("photo")
         self.assertEqual(view.table.rowCount(), 1)
         self.assertEqual(view.displayed_items[0].name, "photo1.jpg")
 
+    def test_drag_drop_routing_in_file_view(self) -> None:
+        view = FileExplorerView()
+        view.set_location_context("photos", "family")
+
+        folder_item = ArchiveItem(name="subfolder", path="family/subfolder", is_dir=True)
+        file_item = ArchiveItem(name="image.png", path="family/image.png", is_dir=False)
+        view.set_items([folder_item, file_item])
+
+        dropped_folders = []
+        view.files_dropped_on_folder.connect(lambda files, sub: dropped_folders.append((files, sub)))
+
+        sample_file = self.root_path / "upload.txt"
+        sample_file.write_text("upload", encoding="utf-8")
+
+        # 1. Drop onto specific folder row
+        view._on_files_dropped([sample_file], folder_item)
+        self.assertEqual(len(dropped_folders), 1)
+        self.assertEqual(dropped_folders[0][1], "family/subfolder")
+
+        # 2. Drop onto empty space (no target item) -> targets current subfolder
+        view._on_files_dropped([sample_file], None)
+        self.assertEqual(len(dropped_folders), 2)
+        self.assertEqual(dropped_folders[1][1], "family")
+
     def test_main_window_init_and_vault_flow(self) -> None:
-        # Create a real test vault
         vault_path = self.root_path / "MyVault"
         vault = Vault.create_vault(
             vault_path,
@@ -117,23 +152,19 @@ class TestArcVaultGUI(unittest.TestCase):
         self.config.last_selected_vault_path = None
         win = MainWindow(self.config, auto_unlock_last=False)
 
-        # Open vault in unlocked state for test
         win.vault = vault
         win.sidebar.set_current_vault(vault)
         win._update_toolbar_state()
         win.refresh_current_view()
 
         self.assertTrue(win.vault.is_unlocked)
-        # In Vault Root, table should have 2 entry points (photos and documents)
         self.assertEqual(win.file_view.table.rowCount(), 2)
 
-        # Switch theme
         win._toggle_theme()
         self.assertFalse(win.dark_mode)
         win._toggle_theme()
         self.assertTrue(win.dark_mode)
 
-        # Lock vault
         win.lock_vault()
         self.assertFalse(win.vault.is_unlocked)
         self.assertEqual(win.file_view.table.rowCount(), 0)

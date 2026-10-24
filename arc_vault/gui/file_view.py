@@ -1,11 +1,11 @@
-"""Table view component displaying archives, folders, and encrypted files."""
+"""Table view component displaying archives, folders, and encrypted files with cross-platform drag-and-drop."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import List, Optional
-from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import QEvent, QMimeData, QModelIndex, QPoint, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QAction, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -23,16 +23,54 @@ from arc_vault.gui.preview_panel import format_size
 
 
 class FileTableWidget(QTableWidget):
-    """QTableWidget with custom drag-and-drop and key handling."""
+    """QTableWidget supporting cross-platform drop targeting and drag export."""
 
-    files_dropped = pyqtSignal(list)  # List[Path]
+    files_dropped_on_item = pyqtSignal(list, object)  # (List[Path], Optional[ArchiveItem])
+    drag_export_requested = pyqtSignal(list)          # List[ArchiveItem]
     delete_pressed = pyqtSignal()
     enter_pressed = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDragEnabled(True)
+        self._drag_start_pos: Optional[QPoint] = None
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) or not self._drag_start_pos:
+            super().mouseMoveEvent(event)
+            return
+
+        dist = (event.pos() - self._drag_start_pos).manhattanLength()
+        if dist < 10:
+            super().mouseMoveEvent(event)
+            return
+
+        # Start Drag to Export
+        selected_indexes = self.selectedIndexes()
+        if not selected_indexes:
+            super().mouseMoveEvent(event)
+            return
+
+        rows = sorted(set(idx.row() for idx in selected_indexes))
+        items: List[ArchiveItem] = []
+        for r in rows:
+            it = self.item(r, 0)
+            if it:
+                item_data = it.data(Qt.ItemDataRole.UserRole)
+                if isinstance(item_data, ArchiveItem):
+                    items.append(item_data)
+
+        if items:
+            self.drag_export_requested.emit(items)
+
+        super().mouseMoveEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -40,8 +78,12 @@ class FileTableWidget(QTableWidget):
         else:
             event.ignore()
 
-    def dragMoveEvent(self, event) -> None:
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if event.mimeData().hasUrls():
+            item = self.itemAt(event.position().toPoint())
+            if item:
+                # Highlight row under cursor
+                self.setCurrentItem(item)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -56,11 +98,19 @@ class FileTableWidget(QTableWidget):
                 if p.exists():
                     file_paths.append(p)
 
-        if file_paths:
-            self.files_dropped.emit(file_paths)
-            event.acceptProposedAction()
-        else:
+        if not file_paths:
             event.ignore()
+            return
+
+        # Identify target item under drop position
+        drop_pos = event.position().toPoint()
+        table_item = self.itemAt(drop_pos)
+        target_archive_item: Optional[ArchiveItem] = None
+        if table_item:
+            target_archive_item = table_item.data(Qt.ItemDataRole.UserRole)
+
+        self.files_dropped_on_item.emit(file_paths, target_archive_item)
+        event.acceptProposedAction()
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -72,16 +122,20 @@ class FileTableWidget(QTableWidget):
 
 
 class FileExplorerView(QWidget):
-    """File table view with search filter, sorting, and context menus."""
+    """File table view with search filter, sorting, and drag-and-drop actions."""
 
     item_selected = pyqtSignal(object)  # Optional[ArchiveItem]
     item_double_clicked = pyqtSignal(object)  # ArchiveItem
-    files_dropped = pyqtSignal(list)  # List[Path]
+    files_dropped_on_folder = pyqtSignal(list, str)  # (List[Path], target_subfolder_str)
+    files_dropped_on_entry_point = pyqtSignal(list, str)  # (List[Path], entry_point_name)
+    files_dropped_root = pyqtSignal(list)  # List[Path]
+    drag_export_requested = pyqtSignal(list)  # List[ArchiveItem]
     create_folder_requested = pyqtSignal()
     add_files_requested = pyqtSignal()
     export_requested = pyqtSignal(list)  # List[ArchiveItem]
     delete_requested = pyqtSignal(list)  # List[ArchiveItem]
     rename_requested = pyqtSignal(ArchiveItem)
+    edit_external_requested = pyqtSignal(ArchiveItem)
 
     COLUMNS = ["Name", "Size", "Type", "Modified", "Packed"]
 
@@ -90,6 +144,8 @@ class FileExplorerView(QWidget):
         self.dark_mode: bool = True
         self.all_items: List[ArchiveItem] = []
         self.displayed_items: List[ArchiveItem] = []
+        self.current_entry_point: str = ""
+        self.current_subfolder: str = ""
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -124,18 +180,22 @@ class FileExplorerView(QWidget):
         self.table.itemDoubleClicked.connect(self._on_double_clicked)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
-        self.table.files_dropped.connect(self.files_dropped.emit)
+        self.table.files_dropped_on_item.connect(self._on_files_dropped)
+        self.table.drag_export_requested.connect(self.drag_export_requested.emit)
         self.table.delete_pressed.connect(self._on_delete_key)
         self.table.enter_pressed.connect(self._on_enter_key)
 
         self.layout.addWidget(self.table)
+
+    def set_location_context(self, entry_point_name: str, subfolder: str = "") -> None:
+        self.current_entry_point = entry_point_name
+        self.current_subfolder = subfolder.strip("/").replace("\\", "/")
 
     def set_theme(self, dark_mode: bool) -> None:
         self.dark_mode = dark_mode
         self.set_items(self.all_items)
 
     def set_items(self, items: List[ArchiveItem]) -> None:
-        """Populate table with archive items."""
         self.all_items = items
         self._filter_items(self.search_bar.text())
 
@@ -231,6 +291,27 @@ class FileExplorerView(QWidget):
         if len(items) == 1:
             self.item_double_clicked.emit(items[0])
 
+    def _on_files_dropped(self, files: List[Path], target_item: Optional[ArchiveItem]) -> None:
+        """Route dropped files to target folder or entry point."""
+        if not self.current_entry_point:
+            # We are in Vault Root
+            if target_item and (target_item.category == FileCategory.ENTRY_POINT or target_item.is_dir):
+                # Dropped directly on an entry point folder row!
+                ep_name = target_item.entry_point_name or target_item.name
+                self.files_dropped_on_entry_point.emit(files, ep_name)
+            else:
+                self.files_dropped_root.emit(files)
+            return
+
+        # Inside an entry point archive
+        if target_item and target_item.is_dir:
+            # Dropped onto a specific subdirectory row
+            target_sub = target_item.path.strip("/")
+            self.files_dropped_on_folder.emit(files, target_sub)
+        else:
+            # Dropped onto table background or non-folder row -> target current subfolder
+            self.files_dropped_on_folder.emit(files, self.current_subfolder)
+
     def _show_context_menu(self, pos) -> None:
         menu = QMenu(self)
         items = self.get_selected_items()
@@ -243,6 +324,10 @@ class FileExplorerView(QWidget):
             else:
                 preview_act = menu.addAction("Preview")
                 preview_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
+
+                edit_act = menu.addAction("Edit in External App...")
+                edit_act.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+                edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
 
             export_act = menu.addAction("Export / Save As...")
             export_act.setIcon(IconProvider.get_icon("download", dark_mode=self.dark_mode, size=16))

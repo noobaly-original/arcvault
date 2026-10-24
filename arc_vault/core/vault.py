@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from arc_vault.core.models import ArchiveItem, EntryPoint, VaultMetadata, classify_file
 from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
@@ -35,6 +35,7 @@ class Vault:
         self.entry_points: Dict[str, EntryPoint] = {}
         self._cache: Dict[str, List[ArchiveItem]] = {}
         self._temp_preview_dir: Optional[tempfile.TemporaryDirectory] = None
+        self._edit_staging_dir: Optional[tempfile.TemporaryDirectory] = None
 
         self._read_metadata()
 
@@ -45,6 +46,12 @@ class Vault:
             except Exception:
                 pass
             self._temp_preview_dir = None
+        if hasattr(self, "_edit_staging_dir") and self._edit_staging_dir:
+            try:
+                self._edit_staging_dir.cleanup()
+            except Exception:
+                pass
+            self._edit_staging_dir = None
 
     def _read_metadata(self) -> None:
         """Read .arcvault metadata if it exists."""
@@ -139,12 +146,10 @@ class Vault:
                 if f.name != self.CHECK_FILENAME
             ]
             if sevenz_files:
-                # Test the first archive
                 first_archive = sevenz_files[0]
                 if not self.sevenzip.test_archive(first_archive, password):
                     return False
             else:
-                # No archives yet in the vault! Create the check archive now
                 self.sevenzip.create_empty_archive(check_file, password)
 
         self._password = password
@@ -153,7 +158,7 @@ class Vault:
         return True
 
     def lock(self) -> None:
-        """Lock the vault, clearing cached passwords and temp previews."""
+        """Lock the vault, clearing cached passwords and temp previews/staging."""
         self._password = None
         self.is_unlocked = False
         self.entry_points.clear()
@@ -164,6 +169,12 @@ class Vault:
             except Exception:
                 pass
             self._temp_preview_dir = None
+        if self._edit_staging_dir:
+            try:
+                self._edit_staging_dir.cleanup()
+            except Exception:
+                pass
+            self._edit_staging_dir = None
 
     @property
     def password(self) -> str:
@@ -176,6 +187,12 @@ class Vault:
         if not self._temp_preview_dir:
             self._temp_preview_dir = tempfile.TemporaryDirectory(prefix="arcvault_preview_")
         return Path(self._temp_preview_dir.name)
+
+    def get_edit_staging_dir(self) -> Path:
+        """Get or create isolated temp directory for external editing staging."""
+        if not self._edit_staging_dir:
+            self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="arcvault_watched_edit_")
+        return Path(self._edit_staging_dir.name)
 
     def refresh_entry_points(self) -> Dict[str, EntryPoint]:
         """Scan vault root for .7z files (entry points)."""
@@ -285,7 +302,6 @@ class Vault:
     def get_items_in_directory(self, entry_point_name: str, subfolder_path: str = "") -> List[ArchiveItem]:
         """
         List immediate children (files and subfolders) inside a specific subfolder.
-        subfolder_path: e.g. "" for root of archive, or "family" for family/
         """
         all_items = self.get_archive_items(entry_point_name)
         norm_sub = subfolder_path.strip("/").replace("\\", "/")
@@ -304,14 +320,11 @@ class Vault:
 
             parts = relative.split("/")
             if len(parts) == 1:
-                # Direct child file or directory
                 results.append(item)
             elif len(parts) > 1:
-                # Immediate subdirectory that might not have an explicit folder record
                 immediate_dir = parts[0]
                 if immediate_dir not in seen_dirs:
                     seen_dirs.add(immediate_dir)
-                    # Check if already present in results
                     if not any(r.name == immediate_dir and r.is_dir for r in results):
                         full_dir_path = f"{norm_sub}/{immediate_dir}" if norm_sub else immediate_dir
                         results.append(
@@ -323,7 +336,6 @@ class Vault:
                             )
                         )
 
-        # Sort: directories first, then alphabetically
         results.sort(key=lambda x: (not x.is_dir, x.name.lower()))
         return results
 
@@ -346,6 +358,48 @@ class Vault:
             self._cache.pop(entry_point_name, None)
             self.refresh_entry_points()
         return ok
+
+    def update_file_from_disk(
+        self,
+        entry_point_name: str,
+        internal_path: str,
+        source_disk_file: Path,
+    ) -> bool:
+        """Update an existing file inside the archive directly from a file on disk."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        if entry_point_name not in self.entry_points:
+            raise ValueError(f"Entry point '{entry_point_name}' not found.")
+
+        ep = self.entry_points[entry_point_name]
+        ok = self.sevenzip.update_single_file(
+            ep.archive_file, source_disk_file, internal_path, self.password
+        )
+        if ok:
+            self._cache.pop(entry_point_name, None)
+            self.refresh_entry_points()
+        return ok
+
+    def update_file_content(
+        self,
+        entry_point_name: str,
+        internal_path: str,
+        content: Union[str, bytes],
+    ) -> bool:
+        """Update an existing file inside the archive with new string or byte content."""
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+            if isinstance(content, str):
+                tmp.write(content.encode("utf-8"))
+            else:
+                tmp.write(content)
+            tmp_path = Path(tmp.name)
+
+        try:
+            return self.update_file_from_disk(entry_point_name, internal_path, tmp_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def create_subfolder(self, entry_point_name: str, parent_subfolder: str, new_folder_name: str) -> bool:
         """Create a new folder inside an entry point."""
@@ -394,6 +448,18 @@ class Vault:
         preview_dir = self.get_preview_temp_dir()
         return self.sevenzip.extract_file_for_preview(
             ep.archive_file, internal_path, self.password, preview_dir
+        )
+
+    def extract_file_for_editing(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
+        """Extract a single file into the persistent watched editing staging directory."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        ep = self.entry_points[entry_point_name]
+        staging_dir = self.get_edit_staging_dir() / entry_point_name
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        return self.sevenzip.extract_file_for_preview(
+            ep.archive_file, internal_path, self.password, staging_dir
         )
 
     def export_items(self, entry_point_name: str, internal_paths: List[str], dest_dir: Path) -> bool:

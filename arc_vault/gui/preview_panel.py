@@ -1,4 +1,4 @@
-"""Rich preview panel supporting images, syntax-highlighted code/text, and executable file cards."""
+"""Rich preview panel supporting images, syntax-highlighted code/text, direct in-app editing, and executable file cards."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QImage, QPixmap
+from PyQt6.QtGui import QFont, QImage, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -50,9 +50,11 @@ def format_size(bytes_size: int) -> str:
 
 
 class PreviewPanel(QWidget):
-    """Multi-view preview panel for text, images, and file metadata cards."""
+    """Multi-view preview panel with direct editing and external editor integration."""
 
     export_requested = pyqtSignal(ArchiveItem)
+    save_text_requested = pyqtSignal(object, str)  # (ArchiveItem, new_text)
+    edit_external_requested = pyqtSignal(object)   # ArchiveItem
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -61,6 +63,8 @@ class PreviewPanel(QWidget):
         self.current_file_path: Optional[Path] = None
         self._zoom_factor: float = 1.0
         self._original_pixmap: Optional[QPixmap] = None
+        self._is_editing_text: bool = False
+        self._original_text_content: str = ""
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(8, 8, 8, 8)
@@ -70,13 +74,43 @@ class PreviewPanel(QWidget):
         self.header_widget = QWidget(self)
         header_layout = QHBoxLayout(self.header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(6)
+        header_layout.setSpacing(4)
 
         self.lbl_title = QLabel("Preview", self)
         self.lbl_title.setStyleSheet("font-weight: 600; font-size: 13px;")
         header_layout.addWidget(self.lbl_title)
 
         header_layout.addStretch()
+
+        # In-App Edit & Save buttons for text/code
+        self.btn_edit_text = QToolButton(self)
+        self.btn_edit_text.setText("Edit")
+        self.btn_edit_text.setToolTip("Edit text directly inside ArcVault")
+        self.btn_edit_text.clicked.connect(self._toggle_text_edit_mode)
+        self.btn_edit_text.setVisible(False)
+        header_layout.addWidget(self.btn_edit_text)
+
+        self.btn_save_text = QToolButton(self)
+        self.btn_save_text.setText("Save")
+        self.btn_save_text.setToolTip("Save and re-encrypt into archive (Ctrl+S / Cmd+S)")
+        self.btn_save_text.clicked.connect(self._save_in_app_text)
+        self.btn_save_text.setVisible(False)
+        self.btn_save_text.setStyleSheet("color: #10b981; font-weight: bold;")
+        header_layout.addWidget(self.btn_save_text)
+
+        self.btn_cancel_edit = QToolButton(self)
+        self.btn_cancel_edit.setText("Cancel")
+        self.btn_cancel_edit.setToolTip("Discard edits and reload")
+        self.btn_cancel_edit.clicked.connect(self._cancel_text_edit)
+        self.btn_cancel_edit.setVisible(False)
+        header_layout.addWidget(self.btn_cancel_edit)
+
+        # External Editor button
+        self.btn_edit_external = QToolButton(self)
+        self.btn_edit_external.setText("Edit Externally")
+        self.btn_edit_external.setToolTip("Open in external editor and auto-update vault on save")
+        self.btn_edit_external.clicked.connect(self._on_edit_external_clicked)
+        header_layout.addWidget(self.btn_edit_external)
 
         self.btn_copy_text = QToolButton(self)
         self.btn_copy_text.setText("Copy")
@@ -86,7 +120,7 @@ class PreviewPanel(QWidget):
         header_layout.addWidget(self.btn_copy_text)
 
         self.btn_open_external = QToolButton(self)
-        self.btn_open_external.setText("Open External")
+        self.btn_open_external.setText("Open")
         self.btn_open_external.setToolTip("Open in default system application")
         self.btn_open_external.clicked.connect(self._open_external)
         header_layout.addWidget(self.btn_open_external)
@@ -99,16 +133,16 @@ class PreviewPanel(QWidget):
 
         self.layout.addWidget(self.header_widget)
 
-        # Stacked pages: 0=Empty, 1=Text, 2=Image, 3=Card (Executables / Media / Other)
+        # Stacked pages: 0=Empty, 1=Text, 2=Image, 3=Card
         self.stack = QStackedWidget(self)
 
-        # Page 0: Empty / Placeholder
+        # Page 0: Empty
         self.page_empty = QWidget()
         empty_layout = QVBoxLayout(self.page_empty)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_empty_icon = QLabel()
         self.lbl_empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_empty_text = QLabel("Select a file to preview")
+        self.lbl_empty_text = QLabel("Select a file to preview or edit")
         self.lbl_empty_text.setStyleSheet("color: #64748b; font-size: 12px;")
         self.lbl_empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(self.lbl_empty_icon)
@@ -126,13 +160,16 @@ class PreviewPanel(QWidget):
         text_layout.addWidget(self.text_edit)
         self.stack.addWidget(self.page_text)
 
+        # Shortcut for Save: Ctrl+S / Cmd+S
+        self.save_shortcut = QShortcut(QKeySequence.StandardKey.Save, self.text_edit)
+        self.save_shortcut.activated.connect(self._on_save_shortcut)
+
         # Page 2: Image Viewer
         self.page_image = QWidget()
         img_layout = QVBoxLayout(self.page_image)
         img_layout.setContentsMargins(0, 0, 0, 0)
         img_layout.setSpacing(4)
 
-        # Image controls
         img_bar = QWidget()
         img_bar_layout = QHBoxLayout(img_bar)
         img_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -167,7 +204,7 @@ class PreviewPanel(QWidget):
         img_layout.addWidget(self.image_scroll)
         self.stack.addWidget(self.page_image)
 
-        # Page 3: Metadata Card (Special Executables & Other Files)
+        # Page 3: Metadata Card
         self.page_card = QWidget()
         card_layout = QVBoxLayout(self.page_card)
         card_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -204,7 +241,8 @@ class PreviewPanel(QWidget):
         self.lbl_empty_icon.setPixmap(
             IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=36).pixmap(36, 36)
         )
-        # Refresh current preview view if open
+        self.btn_edit_text.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+        self.btn_save_text.setIcon(IconProvider.get_icon("save", dark_mode=self.dark_mode, size=16))
         if self.current_item and self.current_file_path:
             self.show_preview(self.current_item, self.current_file_path)
 
@@ -213,8 +251,13 @@ class PreviewPanel(QWidget):
         self.current_item = None
         self.current_file_path = None
         self._original_pixmap = None
+        self._is_editing_text = False
         self.lbl_title.setText("Preview")
         self.btn_copy_text.setVisible(False)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
+        self.btn_edit_external.setEnabled(False)
         self.btn_open_external.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.lbl_empty_icon.setPixmap(
@@ -226,9 +269,13 @@ class PreviewPanel(QWidget):
         """Display preview based on file category."""
         self.current_item = item
         self.current_file_path = local_path
+        self._is_editing_text = False
         self.lbl_title.setText(item.name)
         self.btn_open_external.setEnabled(True)
+        self.btn_edit_external.setEnabled(True)
         self.btn_export.setEnabled(True)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
 
         category = item.category
 
@@ -241,6 +288,9 @@ class PreviewPanel(QWidget):
 
     def _show_image(self, local_path: Path) -> None:
         self.btn_copy_text.setVisible(False)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
         pixmap = QPixmap(str(local_path))
         if pixmap.isNull():
             self._show_card(self.current_item)
@@ -281,15 +331,28 @@ class PreviewPanel(QWidget):
         self._update_image_display()
 
     def _show_text(self, item: ArchiveItem, local_path: Path) -> None:
+        self._is_editing_text = False
         self.btn_copy_text.setVisible(True)
+        self.btn_edit_text.setVisible(True)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
+        self.text_edit.setReadOnly(True)
+
         try:
             content = local_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             self._show_card(item)
             return
 
+        self._original_text_content = content
+
         if len(content) > 500000:
             content = content[:500000] + "\n\n... [File truncated for preview] ..."
+            self.btn_edit_text.setEnabled(False)
+            self.btn_edit_text.setToolTip("File too large for in-app editing. Use Edit Externally.")
+        else:
+            self.btn_edit_text.setEnabled(True)
+            self.btn_edit_text.setToolTip("Edit text directly inside ArcVault")
 
         if HAS_PYGMENTS:
             try:
@@ -306,14 +369,52 @@ class PreviewPanel(QWidget):
 
         self.stack.setCurrentIndex(1)
 
+    def _toggle_text_edit_mode(self) -> None:
+        """Switch to direct in-app text editing mode."""
+        self._is_editing_text = True
+        self.text_edit.setReadOnly(False)
+        self.text_edit.setPlainText(self._original_text_content)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(True)
+        self.btn_cancel_edit.setVisible(True)
+        self.text_edit.setFocus()
+
+    def _cancel_text_edit(self) -> None:
+        """Cancel editing mode and restore original view."""
+        self._is_editing_text = False
+        if self.current_item and self.current_file_path:
+            self._show_text(self.current_item, self.current_file_path)
+
+    def _save_in_app_text(self) -> None:
+        """Emit save signal with updated text content."""
+        if not self.current_item:
+            return
+        new_text = self.text_edit.toPlainText()
+        self.save_text_requested.emit(self.current_item, new_text)
+
+    def _on_save_shortcut(self) -> None:
+        if self._is_editing_text:
+            self._save_in_app_text()
+
+    def on_save_successful(self, new_text: str) -> None:
+        """Called when vault finishes writing and re-encrypting the updated file."""
+        self._original_text_content = new_text
+        if self.current_file_path:
+            try:
+                self.current_file_path.write_text(new_text, encoding="utf-8")
+            except Exception:
+                pass
+        self._cancel_text_edit()
+
     def _show_card(self, item: ArchiveItem) -> None:
-        """Display metadata card for executables, videos, or other files."""
         self.btn_copy_text.setVisible(False)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
         icon = IconProvider.get_category_icon(item.category, dark_mode=self.dark_mode, size=64)
         self.card_icon.setPixmap(icon.pixmap(64, 64))
         self.card_name.setText(item.name)
 
-        # Executable badge
         if item.category == FileCategory.EXECUTABLE_WINDOWS:
             self.card_badge.setText("  WINDOWS EXECUTABLE  ")
             self.card_badge.setStyleSheet(
@@ -368,6 +469,10 @@ class PreviewPanel(QWidget):
                 subprocess.Popen(["xdg-open", path_str])
         except Exception as e:
             print(f"[ArcVault] Failed to open external app: {e}")
+
+    def _on_edit_external_clicked(self) -> None:
+        if self.current_item:
+            self.edit_external_requested.emit(self.current_item)
 
     def _on_export_clicked(self) -> None:
         if self.current_item:

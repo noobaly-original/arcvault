@@ -1,14 +1,16 @@
-"""Main application window for ArcVault."""
+"""Main application window for ArcVault with fast archive editing and cross-platform drag-and-drop."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
-from typing import List, Optional
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QIcon, QKeySequence
+from typing import Dict, List, Optional, Tuple
+from PyQt6.QtCore import QFileSystemWatcher, QPoint, Qt, QUrl
+from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -35,11 +37,17 @@ from arc_vault.gui.preview_panel import PreviewPanel, format_size
 from arc_vault.gui.sidebar import VaultSidebar
 from arc_vault.gui.theme import get_stylesheet
 from arc_vault.gui.vault_dialog import CreateVaultDialog, UnlockVaultDialog
-from arc_vault.gui.workers import AddFilesWorker, ExportFilesWorker, ExtractPreviewWorker, LoadItemsWorker
+from arc_vault.gui.workers import (
+    AddFilesWorker,
+    ExportFilesWorker,
+    ExtractPreviewWorker,
+    LoadItemsWorker,
+    UpdateFileWorker,
+)
 
 
 class MainWindow(QMainWindow):
-    """Main window integrating sidebar, breadcrumbs, file explorer, and preview panel."""
+    """Main window integrating sidebar, breadcrumbs, file explorer, editing, and preview panel."""
 
     def __init__(self, config: AppConfig, auto_unlock_last: bool = False) -> None:
         super().__init__()
@@ -50,17 +58,22 @@ class MainWindow(QMainWindow):
         self.active_entry_point: str = ""
         self.current_subfolder: str = ""
 
-        # Workers
+        # Workers & Watchers
         self._load_worker: Optional[LoadItemsWorker] = None
         self._preview_worker: Optional[ExtractPreviewWorker] = None
         self._add_worker: Optional[AddFilesWorker] = None
         self._export_worker: Optional[ExportFilesWorker] = None
+        self._update_worker: Optional[UpdateFileWorker] = None
+
+        # External Editor Watcher: {str(file_path): (ep_name, internal_path, mtime, hash)}
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self._on_watched_file_changed)
+        self._watched_files: Dict[str, Tuple[str, str, float, str]] = {}
 
         self.setWindowTitle("ArcVault - Encrypted Archive Explorer")
-        self.resize(1150, 720)
+        self.resize(1180, 740)
         self.setMinimumSize(850, 500)
 
-        # Set App Window Icon
         icon_path = Path(__file__).parent.parent / "resources" / "icon.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -68,7 +81,6 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_theme()
 
-        # Load last opened vault if exists
         if self.config.last_selected_vault_path:
             last_p = Path(self.config.last_selected_vault_path)
             if last_p.exists():
@@ -76,7 +88,6 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         """Construct toolbar, panels, and status bar."""
-        # Central Splitter
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
         # 1. Left Sidebar
@@ -90,6 +101,7 @@ class MainWindow(QMainWindow):
         self.sidebar.create_entry_point_requested.connect(self._on_create_entry_point)
         self.sidebar.rename_entry_point_requested.connect(self._on_rename_entry_point)
         self.sidebar.delete_entry_point_requested.connect(self._on_delete_entry_point)
+        self.sidebar.files_dropped_on_entry_point.connect(self._on_files_dropped_on_entry_point)
         self.main_splitter.addWidget(self.sidebar)
 
         # 2. Center Explorer (Breadcrumbs + File View)
@@ -106,29 +118,32 @@ class MainWindow(QMainWindow):
         self.file_view = FileExplorerView(self.center_widget)
         self.file_view.item_selected.connect(self._on_file_selected)
         self.file_view.item_double_clicked.connect(self._on_file_double_clicked)
-        self.file_view.files_dropped.connect(self._on_files_dropped)
+        self.file_view.files_dropped_on_folder.connect(self._on_files_dropped_on_folder)
+        self.file_view.files_dropped_on_entry_point.connect(self._on_files_dropped_on_entry_point)
+        self.file_view.files_dropped_root.connect(self._on_files_dropped_root)
+        self.file_view.drag_export_requested.connect(self._on_drag_export_requested)
         self.file_view.add_files_requested.connect(self._on_add_files_action)
         self.file_view.create_folder_requested.connect(self._on_create_folder_action)
         self.file_view.export_requested.connect(self._on_export_action)
         self.file_view.delete_requested.connect(self._on_delete_action)
         self.file_view.rename_requested.connect(self._on_rename_action)
+        self.file_view.edit_external_requested.connect(self._start_external_editing)
         center_layout.addWidget(self.file_view)
 
         self.main_splitter.addWidget(self.center_widget)
 
-        # 3. Right Preview Panel
+        # 3. Right Preview & Edit Panel
         self.preview_panel = PreviewPanel(self.main_splitter)
         self.preview_panel.export_requested.connect(lambda item: self._on_export_action([item]))
+        self.preview_panel.save_text_requested.connect(self._on_save_in_app_text)
+        self.preview_panel.edit_external_requested.connect(self._start_external_editing)
         self.main_splitter.addWidget(self.preview_panel)
 
-        # Splitter sizing ratio: 220px sidebar, rest center, 320px preview
-        self.main_splitter.setSizes([220, 580, 350])
+        self.main_splitter.setSizes([220, 580, 380])
         self.setCentralWidget(self.main_splitter)
 
-        # Toolbar
         self._build_toolbar()
 
-        # Status Bar
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready. Select or create an encrypted vault to begin.")
@@ -138,25 +153,21 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.addToolBar(self.toolbar)
 
-        # Add Files button
         self.act_add_files = QAction("Add Files", self)
         self.act_add_files.setToolTip("Add and encrypt files into active folder")
         self.act_add_files.triggered.connect(self._on_add_files_action)
         self.toolbar.addAction(self.act_add_files)
 
-        # New Folder / Entry Point button
         self.act_new_folder = QAction("New Folder", self)
         self.act_new_folder.setToolTip("Create new directory (or entry point at root)")
         self.act_new_folder.triggered.connect(self._on_create_folder_action)
         self.toolbar.addAction(self.act_new_folder)
 
-        # Export button
         self.act_export = QAction("Export Selected", self)
         self.act_export.setToolTip("Export selected files/folders to local folder")
         self.act_export.triggered.connect(lambda: self._on_export_action(self.file_view.get_selected_items()))
         self.toolbar.addAction(self.act_export)
 
-        # Delete button
         self.act_delete = QAction("Delete", self)
         self.act_delete.setToolTip("Delete selected items from archive")
         self.act_delete.triggered.connect(lambda: self._on_delete_action(self.file_view.get_selected_items()))
@@ -164,24 +175,20 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
-        # Lock Vault
         self.act_lock = QAction("Lock Vault", self)
         self.act_lock.setToolTip("Lock vault and purge memory keys")
         self.act_lock.triggered.connect(self.lock_vault)
         self.toolbar.addAction(self.act_lock)
 
-        # Spacer to push theme and preview toggle to right
         spacer = QWidget(self)
         spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy().Expanding, spacer.sizePolicy().verticalPolicy().Preferred)
         self.toolbar.addWidget(spacer)
 
-        # Theme Toggle
         self.act_theme = QAction("Theme", self)
         self.act_theme.setToolTip("Toggle Light / Dark mode")
         self.act_theme.triggered.connect(self._toggle_theme)
         self.toolbar.addAction(self.act_theme)
 
-        # Toggle Preview Panel
         self.act_preview_toggle = QAction("Preview Panel", self)
         self.act_preview_toggle.setToolTip("Toggle preview panel visibility")
         self.act_preview_toggle.triggered.connect(self._toggle_preview_panel)
@@ -202,7 +209,6 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(qss)
         IconProvider.clear_cache()
 
-        # Update icons
         self.act_add_files.setIcon(IconProvider.get_icon("upload", dark_mode=self.dark_mode, size=18))
         self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=18))
         self.act_export.setIcon(IconProvider.get_icon("download", dark_mode=self.dark_mode, size=18))
@@ -230,7 +236,6 @@ class MainWindow(QMainWindow):
     # --- Vault Operations ---
 
     def open_vault_by_path(self, path: Path, prompt_unlock: bool = True) -> None:
-        """Select a vault by its filesystem path."""
         if not path.exists():
             QMessageBox.warning(self, "Vault Not Found", f"Directory '{path}' does not exist.")
             self.config.remove_vault(str(path))
@@ -238,7 +243,7 @@ class MainWindow(QMainWindow):
             return
 
         if self.vault and self.vault.root_dir == path and self.vault.is_unlocked:
-            return  # Already open and unlocked
+            return
 
         try:
             self.vault = Vault(path, self.sevenzip)
@@ -268,7 +273,11 @@ class MainWindow(QMainWindow):
                 self.lock_vault()
 
     def lock_vault(self) -> None:
-        """Lock current vault and clear sensitive state."""
+        if self._watched_files:
+            files_to_remove = list(self._watched_files.keys())
+            self.file_watcher.removePaths(files_to_remove)
+            self._watched_files.clear()
+
         if self.vault:
             self.vault.lock()
         self.active_entry_point = ""
@@ -285,9 +294,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() == CreateVaultDialog.DialogCode.Accepted and dlg.created_vault_path:
             self.config.add_or_update_vault(str(dlg.created_vault_path), dlg.created_vault_name)
             self.open_vault_by_path(dlg.created_vault_path, prompt_unlock=False)
-            # Re-read vault as unlocked
             self.vault = Vault(dlg.created_vault_path, self.sevenzip)
-            # Since create_vault in dialog already created it with password, prompt unlock
             dlg_unlock = UnlockVaultDialog(self.vault, self, dark_mode=self.dark_mode)
             if dlg_unlock.exec() == UnlockVaultDialog.DialogCode.Accepted:
                 self.sidebar.set_current_vault(self.vault)
@@ -330,18 +337,18 @@ class MainWindow(QMainWindow):
         self.refresh_current_view()
 
     def refresh_current_view(self) -> None:
-        """Reload file list for active entry point and subfolder."""
         if not self.vault or not self.vault.is_unlocked:
             self.file_view.set_items([])
+            self.file_view.set_location_context("", "")
             self.breadcrumbs.set_path("", "")
             self.preview_panel.set_empty()
             return
 
         self.breadcrumbs.set_path(self.active_entry_point, self.current_subfolder)
+        self.file_view.set_location_context(self.active_entry_point, self.current_subfolder)
         self._update_toolbar_state()
 
         if not self.active_entry_point:
-            # Viewing Vault Root -> Display all Entry Point archives as top-level folders!
             items: List[ArchiveItem] = []
             for ep_name, ep in self.vault.entry_points.items():
                 items.append(
@@ -359,7 +366,6 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Vault Root: {len(items)} entry point archives.")
             return
 
-        # Viewing inside an Entry Point archive
         self.status_bar.showMessage(f"Reading '{self.active_entry_point}.7z'...")
         self._load_worker = LoadItemsWorker(self.vault, self.active_entry_point, self.current_subfolder)
         self._load_worker.items_loaded.connect(self._on_items_loaded)
@@ -385,7 +391,6 @@ class MainWindow(QMainWindow):
             self.preview_panel.set_empty()
             return
 
-        # Trigger background preview extraction
         self._preview_worker = ExtractPreviewWorker(self.vault, item.entry_point_name, item.path)
         self._preview_worker.finished.connect(
             lambda path, err, it=item: self._on_preview_extracted(it, path, err)
@@ -400,33 +405,200 @@ class MainWindow(QMainWindow):
 
     def _on_file_double_clicked(self, item: ArchiveItem) -> None:
         if item.category == FileCategory.ENTRY_POINT or (not self.active_entry_point and item.is_dir):
-            # Double clicked an entry point in Vault Root -> enter it!
             self.active_entry_point = item.entry_point_name or item.name
             self.current_subfolder = ""
             self.sidebar.set_active_entry_point(self.active_entry_point)
             self.refresh_current_view()
         elif item.is_dir:
-            # Double clicked subfolder inside active entry point
             self.current_subfolder = item.path.strip("/")
             self.refresh_current_view()
         else:
-            # Double clicked file -> preview already selected, or open external
             self._on_file_selected(item)
 
-    def _on_files_dropped(self, files: List[Path]) -> None:
-        """Handle drag and drop of files from OS into active folder."""
+    # --- Drag & Drop Implementations ---
+
+    def _on_files_dropped_on_folder(self, files: List[Path], target_subfolder: str) -> None:
+        """User dropped files into a specific folder inside current entry point."""
+        if not self.vault or not self.vault.is_unlocked or not self.active_entry_point:
+            return
+        self._start_add_files(files, target_subfolder=target_subfolder)
+
+    def _on_files_dropped_on_entry_point(self, files: List[Path], ep_name: str) -> None:
+        """User dropped files onto an entry point in the sidebar or root list."""
+        if not self.vault or not self.vault.is_unlocked:
+            return
+        self.active_entry_point = ep_name
+        self.current_subfolder = ""
+        self.sidebar.set_active_entry_point(ep_name)
+        self._start_add_files(files, target_subfolder="")
+
+    def _on_files_dropped_root(self, files: List[Path]) -> None:
+        """User dropped files while in Vault Root."""
         if not self.vault or not self.vault.is_unlocked:
             return
 
-        if not self.active_entry_point:
-            QMessageBox.information(
-                self,
-                "Select Entry Point",
-                "Please select an entry point category archive (e.g. photos or documents) to import files into.",
-            )
+        ep_names = list(self.vault.entry_points.keys())
+        if not ep_names:
+            # Prompt to create initial entry point
+            self._on_create_entry_point()
             return
 
-        self._start_add_files(files)
+        items = ["+ Create New Entry Point (.7z)"] + ep_names
+        chosen, ok = QInputDialog.getItem(
+            self,
+            "Add Dropped Files",
+            f"Select target Entry Point archive for {len(files)} dropped file(s):",
+            items,
+            0,
+            False,
+        )
+        if ok and chosen:
+            if chosen.startswith("+"):
+                name, name_ok = QInputDialog.getText(
+                    self, "New Entry Point", "Enter entry point category name:"
+                )
+                if name_ok and name.strip():
+                    clean_name = name.strip().replace(".7z", "")
+                    self.vault.create_entry_point(clean_name)
+                    self.sidebar.refresh_entry_points()
+                    self._on_files_dropped_on_entry_point(files, clean_name)
+            else:
+                self._on_files_dropped_on_entry_point(files, chosen)
+
+    def _on_drag_export_requested(self, items: List[ArchiveItem]) -> None:
+        """Native cross-platform drag-out: user drags files OUT of ArcVault to desktop/Finder."""
+        if not items or not self.vault or not self.vault.is_unlocked:
+            return
+
+        # Extract to temporary drag cache
+        temp_drag_dir = Path(tempfile.mkdtemp(prefix="arcvault_drag_out_"))
+        extracted_urls: List[QUrl] = []
+
+        ep_name = items[0].entry_point_name or self.active_entry_point
+        internal_paths = [it.path for it in items]
+
+        ok = self.vault.export_items(ep_name, internal_paths, temp_drag_dir)
+        if not ok:
+            return
+
+        for it in items:
+            local_target = temp_drag_dir / it.name
+            if local_target.exists():
+                extracted_urls.append(QUrl.fromLocalFile(str(local_target.resolve())))
+
+        if not extracted_urls:
+            return
+
+        # Prepare QDrag
+        drag = QDrag(self)
+        from PyQt6.QtCore import QMimeData
+        mime = QMimeData()
+        mime.setUrls(extracted_urls)
+        drag.setMimeData(mime)
+
+        first_icon = IconProvider.get_category_icon(items[0].category, dark_mode=self.dark_mode, size=32)
+        drag.setPixmap(first_icon.pixmap(32, 32))
+        drag.setHotSpot(QPoint(16, 16))
+
+        drag.exec(Qt.DropAction.CopyAction)
+
+    # --- Editing Vault Archives (In-App & External) ---
+
+    def _on_save_in_app_text(self, item: ArchiveItem, new_text: str) -> None:
+        """Handle saving directly edited text inside the app."""
+        if not self.vault or not self.vault.is_unlocked:
+            return
+
+        self.status_bar.showMessage(f"Saving and re-encrypting '{item.name}' into {item.entry_point_name}.7z...")
+        self._update_worker = UpdateFileWorker(
+            self.vault, item.entry_point_name, item.path, new_text
+        )
+        self._update_worker.finished.connect(
+            lambda ok, err, txt=new_text, it=item: self._on_in_app_save_finished(it, txt, ok, err)
+        )
+        self._update_worker.start()
+
+    def _on_in_app_save_finished(self, item: ArchiveItem, new_text: str, success: bool, error_msg: str) -> None:
+        if success:
+            self.status_bar.showMessage(f"Successfully updated '{item.name}' in {item.entry_point_name}.7z.")
+            self.preview_panel.on_save_successful(new_text)
+            self.refresh_current_view()
+        else:
+            QMessageBox.critical(self, "Save Failed", f"Could not update file in archive: {error_msg}")
+            self.status_bar.showMessage("Save failed.")
+
+    def _start_external_editing(self, item: ArchiveItem) -> None:
+        """Extract file to watched directory and launch external editor."""
+        if not self.vault or not self.vault.is_unlocked:
+            return
+
+        staged_path = self.vault.extract_file_for_editing(item.entry_point_name, item.path)
+        if not staged_path or not staged_path.exists():
+            QMessageBox.warning(self, "Edit Error", "Could not extract file for editing.")
+            return
+
+        path_str = str(staged_path.resolve())
+        mtime = staged_path.stat().st_mtime
+        file_hash = self._compute_file_hash(staged_path)
+
+        self._watched_files[path_str] = (item.entry_point_name, item.path, mtime, file_hash)
+        self.file_watcher.addPath(path_str)
+
+        self.status_bar.showMessage(
+            f"Opened '{item.name}' in external editor. Changes will auto-save to vault."
+        )
+
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", path_str])
+            elif sys.platform == "win32":
+                os.startfile(path_str)
+            else:
+                subprocess.Popen(["xdg-open", path_str])
+        except Exception as e:
+            QMessageBox.warning(self, "Launch Error", f"Failed to launch external editor: {e}")
+
+    def _on_watched_file_changed(self, file_path_str: str) -> None:
+        """Called by QFileSystemWatcher whenever an external application modifies the staged file."""
+        if file_path_str not in self._watched_files:
+            return
+
+        p = Path(file_path_str)
+        if not p.exists():
+            return
+
+        ep_name, internal_path, last_mtime, last_hash = self._watched_files[file_path_str]
+        new_mtime = p.stat().st_mtime
+        new_hash = self._compute_file_hash(p)
+
+        if new_hash == last_hash:
+            return  # No actual change in content
+
+        self._watched_files[file_path_str] = (ep_name, internal_path, new_mtime, new_hash)
+        self.status_bar.showMessage(
+            f"Detected modification in '{p.name}'. Re-encrypting into {ep_name}.7z..."
+        )
+
+        ok = self.vault.update_file_from_disk(ep_name, internal_path, p)
+        if ok:
+            self.status_bar.showMessage(
+                f"Auto-saved external edits of '{p.name}' into {ep_name}.7z."
+            )
+            # Re-read preview if it's currently selected
+            if self.preview_panel.current_item and self.preview_panel.current_item.path == internal_path:
+                self.preview_panel.show_preview(self.preview_panel.current_item, p)
+            self.refresh_current_view()
+        else:
+            self.status_bar.showMessage(f"Failed to auto-save edits of '{p.name}'.")
+
+    @staticmethod
+    def _compute_file_hash(path: Path) -> str:
+        try:
+            return hashlib.md5(path.read_bytes()).hexdigest()
+        except Exception:
+            return ""
+
+    # --- Actions ---
 
     def _on_add_files_action(self) -> None:
         if not self.vault or not self.vault.is_unlocked or not self.active_entry_point:
@@ -435,12 +607,15 @@ class MainWindow(QMainWindow):
         files, _ = QFileDialog.getOpenFileNames(self, f"Add Files to '{self.active_entry_point}'", str(Path.home()))
         if files:
             path_objs = [Path(f) for f in files]
-            self._start_add_files(path_objs)
+            self._start_add_files(path_objs, target_subfolder=self.current_subfolder)
 
-    def _start_add_files(self, files: List[Path]) -> None:
-        self.status_bar.showMessage(f"Encrypting and adding {len(files)} items into {self.active_entry_point}.7z...")
+    def _start_add_files(self, files: List[Path], target_subfolder: str = "") -> None:
+        sub_info = f"/{target_subfolder}" if target_subfolder else ""
+        self.status_bar.showMessage(
+            f"Encrypting and adding {len(files)} items into {self.active_entry_point}.7z{sub_info}..."
+        )
         self._add_worker = AddFilesWorker(
-            self.vault, self.active_entry_point, files, subfolder=self.current_subfolder
+            self.vault, self.active_entry_point, files, subfolder=target_subfolder
         )
         self._add_worker.finished.connect(self._on_add_finished)
         self._add_worker.start()
@@ -458,11 +633,9 @@ class MainWindow(QMainWindow):
             return
 
         if not self.active_entry_point:
-            # In Vault Root -> Prompt to create new Entry Point .7z archive!
             self._on_create_entry_point()
             return
 
-        # Inside an entry point -> Create subfolder
         name, ok = QInputDialog.getText(
             self, "New Folder", f"Create new folder inside '{self.active_entry_point}':"
         )
@@ -558,7 +731,6 @@ class MainWindow(QMainWindow):
             return
 
         if not self.active_entry_point:
-            # Deleting entry points from Vault Root
             for item in items:
                 self._on_delete_entry_point(item.entry_point_name or item.name)
             return
@@ -591,7 +763,6 @@ class MainWindow(QMainWindow):
         )
         if ok and new_name.strip() and new_name.strip() != item.name:
             clean_name = new_name.strip()
-            # Construct target path inside archive
             parent = "/".join(item.path.split("/")[:-1])
             new_path = f"{parent}/{clean_name}".strip("/") if parent else clean_name
             ok_rn = self.vault.rename_item(self.active_entry_point, item.path, new_path)
@@ -601,7 +772,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Rename Error", "Failed to rename item in archive.")
 
     def closeEvent(self, event) -> None:
-        """Lock and clean up on close."""
+        if self._watched_files:
+            self.file_watcher.removePaths(list(self._watched_files.keys()))
+            self._watched_files.clear()
         if self.vault:
             self.vault.lock()
         event.accept()
