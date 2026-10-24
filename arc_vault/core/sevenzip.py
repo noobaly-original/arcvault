@@ -157,14 +157,15 @@ class SevenZip:
 
         items: List[ArchiveItem] = []
         raw_blocks = res.stdout.split("\n\n")
+        raw_entries: List[Dict[str, str]] = []
 
         for block in raw_blocks:
-            lines = [line.strip() for line in block.splitlines() if line.strip()]
-            if not lines:
+            lines_block = [line.strip() for line in block.splitlines() if line.strip()]
+            if not lines_block:
                 continue
 
             entry_dict: Dict[str, str] = {}
-            for line in lines:
+            for line in lines_block:
                 if "=" in line:
                     key, val = line.split("=", 1)
                     entry_dict[key.strip()] = val.strip()
@@ -178,11 +179,27 @@ class SevenZip:
             if path_val.endswith(".arcvault_init"):
                 continue
 
-            is_folder = entry_dict.get("Folder") == "+"
+            raw_entries.append(entry_dict)
+
+        # Build path index to identify directories that parent other files
+        all_paths = {e.get("Path", "").replace("\\", "/").strip("/") for e in raw_entries}
+
+        for entry_dict in raw_entries:
+            path_val = entry_dict.get("Path", "").replace("\\", "/").strip("/")
+            attributes = entry_dict.get("Attributes", "")
+
+            # Thorough directory detection across all 7-Zip platforms (POSIX 'D', 'drwxr-xr-x', 'Folder=+', or parent prefix)
+            attr_first = attributes.split()[0] if attributes else ""
+            is_folder = (
+                entry_dict.get("Folder") == "+"
+                or "D" in attr_first
+                or attr_first.startswith("d")
+                or any(other != path_val and other.startswith(path_val + "/") for other in all_paths)
+            )
+
             size = int(entry_dict.get("Size", 0)) if entry_dict.get("Size", "").isdigit() else 0
             packed_size = int(entry_dict.get("Packed Size", 0)) if entry_dict.get("Packed Size", "").isdigit() else 0
             modified = entry_dict.get("Modified")
-            attributes = entry_dict.get("Attributes", "")
             crc = entry_dict.get("CRC")
             encrypted = entry_dict.get("Encrypted") == "+"
 
@@ -192,7 +209,7 @@ class SevenZip:
             items.append(
                 ArchiveItem(
                     name=item_name,
-                    path=path_val.replace("\\", "/"),
+                    path=path_val,
                     is_dir=is_folder,
                     size=size,
                     packed_size=packed_size,

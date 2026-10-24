@@ -27,6 +27,7 @@ class FileTableWidget(QTableWidget):
 
     files_dropped_on_item = pyqtSignal(list, object)  # (List[Path], Optional[ArchiveItem])
     drag_export_requested = pyqtSignal(list)          # List[ArchiveItem]
+    internal_move_requested = pyqtSignal(str, list, object)  # (source_ep, item_paths, target_item)
     delete_pressed = pyqtSignal()
     enter_pressed = pyqtSignal()
 
@@ -72,13 +73,15 @@ class FileTableWidget(QTableWidget):
         super().mouseMoveEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime.hasUrls() or mime.hasFormat("application/x-arcvault-internal"):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime.hasUrls() or mime.hasFormat("application/x-arcvault-internal"):
             row = self.rowAt(int(event.position().y()))
             if 0 <= row < self.rowCount():
                 col0 = self.item(row, 0)
@@ -89,7 +92,31 @@ class FileTableWidget(QTableWidget):
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        urls = event.mimeData().urls()
+        mime = event.mimeData()
+        row = self.rowAt(int(event.position().y()))
+        target_archive_item: Optional[ArchiveItem] = None
+        if 0 <= row < self.rowCount():
+            col0 = self.item(row, 0)
+            if col0:
+                data = col0.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, ArchiveItem):
+                    target_archive_item = data
+
+        if mime.hasFormat("application/x-arcvault-internal"):
+            try:
+                import json
+                raw_bytes = bytes(mime.data("application/x-arcvault-internal"))
+                payload = json.loads(raw_bytes.decode("utf-8"))
+                source_ep = payload.get("entry_point", "")
+                source_paths = payload.get("paths", [])
+                if source_ep and source_paths:
+                    self.internal_move_requested.emit(source_ep, source_paths, target_archive_item)
+                    event.acceptProposedAction()
+                    return
+            except Exception:
+                pass
+
+        urls = mime.urls()
         file_paths: List[Path] = []
         for u in urls:
             local = u.toLocalFile()
@@ -101,16 +128,6 @@ class FileTableWidget(QTableWidget):
         if not file_paths:
             event.ignore()
             return
-
-        # Target item row resolution across any column
-        row = self.rowAt(int(event.position().y()))
-        target_archive_item: Optional[ArchiveItem] = None
-        if 0 <= row < self.rowCount():
-            col0 = self.item(row, 0)
-            if col0:
-                data = col0.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, ArchiveItem):
-                    target_archive_item = data
 
         self.files_dropped_on_item.emit(file_paths, target_archive_item)
         event.acceptProposedAction()
@@ -139,6 +156,8 @@ class FileExplorerView(QWidget):
     delete_requested = pyqtSignal(list)  # List[ArchiveItem]
     rename_requested = pyqtSignal(ArchiveItem)
     edit_external_requested = pyqtSignal(ArchiveItem)
+    move_requested = pyqtSignal(list)  # List[ArchiveItem]
+    internal_move_requested = pyqtSignal(str, list, object)  # (source_ep, item_paths, target_item)
 
     COLUMNS = ["Name", "Size", "Type", "Modified", "Packed"]
 
@@ -184,6 +203,7 @@ class FileExplorerView(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.files_dropped_on_item.connect(self._on_files_dropped)
+        self.table.internal_move_requested.connect(self.internal_move_requested.emit)
         self.table.drag_export_requested.connect(self.drag_export_requested.emit)
         self.table.delete_pressed.connect(self._on_delete_key)
         self.table.enter_pressed.connect(self._on_enter_key)
@@ -328,6 +348,11 @@ class FileExplorerView(QWidget):
                 edit_act = menu.addAction("Edit in External App...")
                 edit_act.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
                 edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
+
+            menu.addSeparator()
+            move_act = menu.addAction("Move to Folder...")
+            move_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
+            move_act.triggered.connect(lambda: self.move_requested.emit(items))
 
             export_act = menu.addAction("Export / Save As...")
             export_act.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=16))

@@ -317,11 +317,10 @@ class Vault:
         all_items = self.get_archive_items(entry_point_name)
         norm_sub = subfolder_path.strip("/").replace("\\", "/")
 
-        results: List[ArchiveItem] = []
-        seen_dirs = set()
+        results_dict: Dict[str, ArchiveItem] = {}
 
         for item in all_items:
-            item_path = item.path.strip("/")
+            item_path = item.path.strip("/").replace("\\", "/")
             if norm_sub:
                 if not item_path.startswith(norm_sub + "/"):
                     continue
@@ -333,31 +332,80 @@ class Vault:
                 continue
 
             parts = relative.split("/")
+            first_segment = parts[0]
             if len(parts) == 1:
-                # Immediate child
-                results.append(item)
+                # Immediate child (can be a file or a folder)
+                if first_segment not in results_dict or item.is_dir:
+                    results_dict[first_segment] = item
             else:
                 # Intermediate directory
-                immediate_dir = parts[0]
-                if immediate_dir not in seen_dirs:
-                    seen_dirs.add(immediate_dir)
-                    full_dir_path = f"{norm_sub}/{immediate_dir}" if norm_sub else immediate_dir
-                    # Check if there's an explicit folder item for this
-                    existing_folder = next((i for i in all_items if i.path.strip("/") == full_dir_path and i.is_dir), None)
-                    if existing_folder:
-                        results.append(existing_folder)
+                if first_segment not in results_dict:
+                    full_dir_path = f"{norm_sub}/{first_segment}" if norm_sub else first_segment
+                    # Check if there is an explicit folder item in all_items
+                    explicit_dir = next(
+                        (i for i in all_items if i.path.strip("/").replace("\\", "/") == full_dir_path and i.is_dir),
+                        None,
+                    )
+                    if explicit_dir:
+                        results_dict[first_segment] = explicit_dir
                     else:
-                        results.append(
-                            ArchiveItem(
-                                name=immediate_dir,
-                                path=full_dir_path,
-                                is_dir=True,
-                                entry_point_name=entry_point_name,
-                            )
+                        results_dict[first_segment] = ArchiveItem(
+                            name=first_segment,
+                            path=full_dir_path,
+                            is_dir=True,
+                            category=FileCategory.FOLDER,
+                            entry_point_name=entry_point_name,
                         )
 
+        results = list(results_dict.values())
         results.sort(key=lambda x: (not x.is_dir, x.name.lower()))
         return results
+
+    def get_all_subfolders(self, entry_point_name: str) -> List[str]:
+        """Return a sorted list of all unique subfolder paths inside an entry point."""
+        items = self.get_archive_items(entry_point_name)
+        dirs = set()
+        for i in items:
+            if i.is_dir:
+                dirs.add(i.path.strip("/").replace("\\", "/"))
+            else:
+                parts = i.path.strip("/").replace("\\", "/").split("/")
+                if len(parts) > 1:
+                    for k in range(1, len(parts)):
+                        dirs.add("/".join(parts[:k]))
+        return sorted(dirs)
+
+    def move_items(self, entry_point_name: str, item_paths: List[str], target_subfolder: str) -> bool:
+        """
+        Move items within an entry point into a target subfolder using 7-Zip internal rename (rn).
+        """
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        if entry_point_name not in self.entry_points:
+            raise ValueError(f"Entry point '{entry_point_name}' not found.")
+
+        ep = self.entry_points[entry_point_name]
+        clean_target = target_subfolder.strip("/").replace("\\", "/")
+
+        success = True
+        for old_path in item_paths:
+            clean_old = old_path.strip("/").replace("\\", "/")
+            item_name = clean_old.split("/")[-1]
+            new_path = f"{clean_target}/{item_name}".strip("/") if clean_target else item_name
+
+            if clean_old == new_path:
+                continue
+
+            ok = self.sevenzip.rename_item(ep.archive_file, clean_old, new_path, self.password)
+            if not ok:
+                success = False
+
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+        dest_desc = f"/{clean_target}" if clean_target else "root"
+        log_info(f"Moved {len(item_paths)} items in '{entry_point_name}.7z' to {dest_desc}")
+        return success
 
     def add_files(
         self,

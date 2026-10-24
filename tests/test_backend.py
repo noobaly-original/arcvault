@@ -193,6 +193,67 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertTrue(ok)
         self.assertNotIn("work_archive", vault.entry_points)
 
+    def test_subfolders_and_move_operations(self) -> None:
+        vault = Vault.create_vault(
+            self.root_path,
+            name="Folder Vault",
+            password=self.password,
+            initial_entry_points=["data"],
+            sevenzip=self.sz,
+        )
+
+        # 1. Create subfolder inside archive
+        self.assertTrue(vault.create_subfolder("data", "", "documents"))
+        root_items = vault.get_items_in_directory("data", "")
+        doc_item = next(i for i in root_items if i.name == "documents")
+        self.assertTrue(doc_item.is_dir)
+        self.assertEqual(doc_item.category, FileCategory.FOLDER)
+
+        # 2. Add local directory with files into vault root
+        local_dir = self.root_path / "imported_folder"
+        local_dir.mkdir()
+        (local_dir / "sample.txt").write_text("sample content", encoding="utf-8")
+        nested_sub = local_dir / "nested"
+        nested_sub.mkdir()
+        (nested_sub / "inner.txt").write_text("inner content", encoding="utf-8")
+
+        self.assertTrue(vault.add_files("data", [local_dir]))
+        root_items2 = vault.get_items_in_directory("data", "")
+        imported_item = next(i for i in root_items2 if i.name == "imported_folder")
+        self.assertTrue(imported_item.is_dir)
+        self.assertEqual(imported_item.category, FileCategory.FOLDER)
+
+        # Verify contents of imported folder
+        folder_items = vault.get_items_in_directory("data", "imported_folder")
+        folder_names = [i.name for i in folder_items]
+        self.assertIn("sample.txt", folder_names)
+        self.assertIn("nested", folder_names)
+        nested_item = next(i for i in folder_items if i.name == "nested")
+        self.assertTrue(nested_item.is_dir)
+        self.assertEqual(nested_item.category, FileCategory.FOLDER)
+
+        # 3. Add standalone file to root and move it into documents folder
+        root_file = self.root_path / "movable.txt"
+        root_file.write_text("to be moved", encoding="utf-8")
+        self.assertTrue(vault.add_files("data", [root_file]))
+
+        self.assertTrue(vault.move_items("data", ["movable.txt"], "documents"))
+        root_after_move = [i.name for i in vault.get_items_in_directory("data", "")]
+        self.assertNotIn("movable.txt", root_after_move)
+
+        docs_after_move = [i.name for i in vault.get_items_in_directory("data", "documents")]
+        self.assertIn("movable.txt", docs_after_move)
+
+        # 4. Move imported_folder into documents
+        self.assertTrue(vault.move_items("data", ["imported_folder"], "documents"))
+        docs_items = [i.name for i in vault.get_items_in_directory("data", "documents")]
+        self.assertIn("imported_folder", docs_items)
+
+        # Verify nested file inside moved folder is intact
+        preview = vault.extract_file_for_preview("data", "documents/imported_folder/nested/inner.txt")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview.read_text(encoding="utf-8"), "inner content")
+
 
 if __name__ == "__main__":
     unittest.main()

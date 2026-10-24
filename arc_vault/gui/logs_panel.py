@@ -109,9 +109,24 @@ class LogsPanel(QWidget):
         log_emitter.entry_logged.connect(self._on_new_entry)
 
     def _on_new_entry(self, entry: LogEntry) -> None:
-        self._entries.append(entry)
-        if self._matches_filter(entry):
-            self._append_entry_to_view(entry)
+        try:
+            if not hasattr(self, "text_edit") or self.text_edit is None:
+                return
+            self._entries.append(entry)
+            if self._matches_filter(entry):
+                self._append_entry_to_view(entry)
+        except RuntimeError:
+            try:
+                log_emitter.entry_logged.disconnect(self._on_new_entry)
+            except Exception:
+                pass
+
+    def closeEvent(self, event) -> None:
+        try:
+            log_emitter.entry_logged.disconnect(self._on_new_entry)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _matches_filter(self, entry: LogEntry) -> bool:
         filter_mode = self.filter_combo.currentText()

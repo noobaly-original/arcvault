@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -134,6 +135,8 @@ class MainWindow(QMainWindow):
         self.file_view.delete_requested.connect(self._on_delete_action)
         self.file_view.rename_requested.connect(self._on_rename_action)
         self.file_view.edit_external_requested.connect(self._start_external_editing)
+        self.file_view.move_requested.connect(self._on_move_action)
+        self.file_view.internal_move_requested.connect(self._on_internal_move_requested)
         self.center_splitter.addWidget(self.file_view)
 
         self.logs_panel = LogsPanel(self.center_splitter)
@@ -525,6 +528,11 @@ class MainWindow(QMainWindow):
         from PyQt6.QtCore import QMimeData
         mime = QMimeData()
         mime.setUrls(extracted_urls)
+        internal_payload = {
+            "entry_point": ep_name,
+            "paths": internal_paths,
+        }
+        mime.setData("application/x-arcvault-internal", json.dumps(internal_payload).encode("utf-8"))
         drag.setMimeData(mime)
 
         first_icon = IconProvider.get_category_icon(items[0].category, dark_mode=self.dark_mode, size=32)
@@ -801,6 +809,105 @@ class MainWindow(QMainWindow):
                 self.refresh_current_view()
             else:
                 QMessageBox.warning(self, "Rename Error", "Failed to rename item in archive.")
+
+    def _on_move_action(self, items: List[ArchiveItem]) -> None:
+        """Prompt user with a list of destination subfolders to move selected items into."""
+        if not items or not self.vault or not self.vault.is_unlocked or not self.active_entry_point:
+            return
+
+        all_subs = self.vault.get_all_subfolders(self.active_entry_point)
+        item_paths = {i.path.strip("/") for i in items}
+        valid_destinations = ["/ [Root Folder]"]
+        for s in all_subs:
+            if any(s == p or s.startswith(p + "/") for p in item_paths):
+                continue
+            valid_destinations.append(s)
+
+        valid_destinations.append("+ Create New Folder...")
+
+        chosen, ok = QInputDialog.getItem(
+            self,
+            "Move Items",
+            f"Select destination folder for {len(items)} item(s):",
+            valid_destinations,
+            current=0,
+            editable=False,
+        )
+        if not ok or not chosen:
+            return
+
+        if chosen == "+ Create New Folder...":
+            new_name, ok_new = QInputDialog.getText(
+                self, "New Folder", f"Create new folder inside '{self.active_entry_point}':"
+            )
+            if not ok_new or not new_name.strip():
+                return
+            clean_name = new_name.strip()
+            self.vault.create_subfolder(self.active_entry_point, self.current_subfolder, clean_name)
+            target_sub = f"{self.current_subfolder}/{clean_name}".strip("/") if self.current_subfolder else clean_name
+        elif chosen == "/ [Root Folder]":
+            target_sub = ""
+        else:
+            target_sub = chosen
+
+        ok_move = self.vault.move_items(self.active_entry_point, [i.path for i in items], target_sub)
+        if ok_move:
+            self.refresh_current_view()
+            dest_name = target_sub if target_sub else "root"
+            self.status_bar.showMessage(f"Moved {len(items)} item(s) to '{dest_name}'.")
+        else:
+            QMessageBox.warning(self, "Move Error", "Failed to move one or more items.")
+            self.refresh_current_view()
+
+    def _on_internal_move_requested(
+        self,
+        source_ep: str,
+        item_paths: List[str],
+        target_item: Optional[ArchiveItem],
+    ) -> None:
+        """Handle moving files/folders inside the archive when dragged onto a folder."""
+        if not self.vault or not self.vault.is_unlocked:
+            return
+
+        if not self.active_entry_point or source_ep != self.active_entry_point:
+            return
+
+        # Determine destination subfolder
+        if target_item and target_item.is_dir:
+            target_subfolder = target_item.path.strip("/")
+        elif not target_item:
+            # Dropped on empty area in current view
+            target_subfolder = self.current_subfolder
+        else:
+            return
+
+        # Prevent moving a folder into itself or its own subdirectories
+        for p in item_paths:
+            clean_p = p.strip("/")
+            if clean_p == target_subfolder or target_subfolder.startswith(clean_p + "/"):
+                QMessageBox.warning(self, "Invalid Move", f"Cannot move '{clean_p}' into itself or its subfolder.")
+                return
+
+        # Filter out items already in target folder
+        items_to_move = []
+        for p in item_paths:
+            clean_p = p.strip("/")
+            parent = "/".join(clean_p.split("/")[:-1])
+            if parent != target_subfolder:
+                items_to_move.append(p)
+
+        if not items_to_move:
+            return
+
+        self.status_bar.showMessage(f"Moving {len(items_to_move)} item(s) to '{target_subfolder or root}'...")
+        ok = self.vault.move_items(self.active_entry_point, items_to_move, target_subfolder)
+        if ok:
+            self.refresh_current_view()
+            dest_name = target_item.name if target_item else (target_subfolder or "root")
+            self.status_bar.showMessage(f"Successfully moved {len(items_to_move)} item(s) to '{dest_name}'.")
+        else:
+            QMessageBox.warning(self, "Move Error", "Failed to move one or more items.")
+            self.refresh_current_view()
 
     def _restore_window_state(self) -> None:
         """Restore window size, position, maximized state, and splitter layout from config."""

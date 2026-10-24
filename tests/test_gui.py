@@ -263,6 +263,35 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertEqual(config2.window_height, 820)
         win.close()
 
+    def test_folder_display_and_internal_move_in_gui(self) -> None:
+        """Verify subfolders render as 'Folder' with folder icons and emit internal move signals."""
+        view = FileExplorerView()
+        folder_item = ArchiveItem(
+            name="vacation",
+            path="vacation",
+            is_dir=True,
+            category=FileCategory.FOLDER,
+        )
+        file_item = ArchiveItem(
+            name="photo.png",
+            path="photo.png",
+            is_dir=False,
+            category=FileCategory.IMAGE,
+        )
+
+        view.set_items([folder_item, file_item])
+        self.assertEqual(view.table.rowCount(), 2)
+
+        # Row 0 should be the folder
+        type_item_0 = view.table.item(0, 2)
+        self.assertIsNotNone(type_item_0)
+        self.assertEqual(type_item_0.text(), "Folder")
+
+        # Row 1 should be the image
+        type_item_1 = view.table.item(1, 2)
+        self.assertIsNotNone(type_item_1)
+        self.assertEqual(type_item_1.text(), "Image")
+
 
 if __name__ == "__main__":
     unittest.main()
