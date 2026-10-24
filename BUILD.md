@@ -1,6 +1,42 @@
 # 🛠️ ArcVault Build & Compilation Guide
 
-This document describes how to compile **ArcVault** into a standalone, distribution-ready executable and macOS application bundle using **PyInstaller**.
+This document describes how to compile **ArcVault** into portable **"onefile" standalone executables** and native application bundles across **macOS**, **Windows**, and **Linux** using **PyInstaller**.
+
+---
+
+## ⚡ Quick Start: 1-Click Platform Build Scripts
+
+ArcVault includes automated build scripts located in the root directory (and mirrored in `scripts/`) that set up dependencies, compile portable standalone binaries, configure Retina icons, and sign binaries:
+
+### 🍎 macOS (Apple Silicon & Intel)
+```bash
+chmod +x build_mac.sh
+./build_mac.sh
+```
+- Produces:
+  - `dist/ArcVault` — Standalone portable onefile binary (can be run directly or copied anywhere).
+  - `dist/ArcVault.app` — Native macOS Application Bundle.
+
+### 🪟 Windows (x64)
+In Command Prompt (`cmd.exe`):
+```cmd
+build_windows.bat
+```
+Or in PowerShell:
+```powershell
+.\build_windows.ps1
+```
+- Produces:
+  - `dist\ArcVault.exe` — Standalone portable onefile Windows executable.
+- **USB / Portable Tip**: You can carry `ArcVault.exe` on a USB drive. If 7-Zip is not installed on the host machine, simply drop `7z.exe` and `7z.dll` next to `ArcVault.exe`.
+
+### 🐧 Linux (x86_64 & aarch64)
+```bash
+chmod +x build_linux.sh
+./build_linux.sh
+```
+- Produces:
+  - `dist/ArcVault` — Standalone portable onefile ELF binary.
 
 ---
 
@@ -15,101 +51,46 @@ This document describes how to compile **ArcVault** into a standalone, distribut
 
 ---
 
-## 🚀 Step 1: Environment Setup
+## 🚀 Manual Build Guide
 
-Clone the repository and create an isolated virtual environment:
+### Step 1: Virtual Environment Setup
 
 ```bash
 git clone https://github.com/noobaly-original/arcvault.git
 cd arcvault
 
-# Recommended: using uv
+# Using uv (fast):
 uv venv .venv
-source .venv/bin/activate
+source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 uv pip install -r requirements.txt
 uv pip install pyinstaller
 
 # Or using standard python:
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate    # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install pyinstaller
 ```
 
 ---
 
-## 📦 Step 2: Compiling with PyInstaller
+### Step 2: Compiling with Spec Files
 
-### Option A: Using the Included Specification File (Recommended)
+ArcVault provides two specification files:
 
-ArcVault includes a preconfigured `arcvault.spec` file that handles data bundling, vector icons, Pygments syntax highlighters, and macOS app bundle settings:
-
+#### 1. Portable Single-File Executable (`arcvault_onefile.spec`)
+Packs Python, PyQt6, Pillow, Pygments, and all graphics assets into a single self-extracting executable:
 ```bash
-# Activate your virtual environment first
-source .venv/bin/activate
+pyinstaller arcvault_onefile.spec --noconfirm --clean
+```
+Output:
+- **macOS / Linux**: `dist/ArcVault`
+- **Windows**: `dist\ArcVault.exe`
 
-# Clean and build the distribution
+#### 2. Native macOS Directory / App Bundle (`arcvault.spec`)
+Builds a standard native macOS bundle (`dist/ArcVault.app`):
+```bash
 pyinstaller arcvault.spec --noconfirm --clean
-```
-
-Upon completion, your binaries will be in the `dist/` directory:
-- **macOS**:
-  - `dist/ArcVault.app` (macOS Application Bundle with Retina vector icon)
-  - `dist/ArcVault/ArcVault` (Standalone UNIX binary)
-- **Linux**:
-  - `dist/ArcVault/ArcVault` (Standalone executable)
-- **Windows**:
-  - `dist\ArcVault\ArcVault.exe` (Standalone Windows executable)
-
----
-
-### Option B: Compiling from CLI Directly
-
-If you prefer building directly from the command line without the `.spec` file:
-
-#### macOS:
-```bash
-pyinstaller run.py \
-  --name "ArcVault" \
-  --windowed \
-  --icon "arc_vault/resources/ArcVault.icns" \
-  --add-data "arc_vault/resources:arc_vault/resources" \
-  --hidden-import "PyQt6.QtCore" \
-  --hidden-import "PyQt6.QtGui" \
-  --hidden-import "PyQt6.QtWidgets" \
-  --hidden-import "pygments" \
-  --hidden-import "PIL" \
-  --noconfirm --clean
-```
-
-#### Windows:
-```cmd
-pyinstaller run.py ^
-  --name "ArcVault" ^
-  --windowed ^
-  --icon "arc_vault/resources/icon.png" ^
-  --add-data "arc_vault/resources;arc_vault/resources" ^
-  --hidden-import "PyQt6.QtCore" ^
-  --hidden-import "PyQt6.QtGui" ^
-  --hidden-import "PyQt6.QtWidgets" ^
-  --hidden-import "pygments" ^
-  --hidden-import "PIL" ^
-  --noconfirm --clean
-```
-
-#### Linux:
-```bash
-pyinstaller run.py \
-  --name "ArcVault" \
-  --windowed \
-  --icon "arc_vault/resources/icon.png" \
-  --add-data "arc_vault/resources:arc_vault/resources" \
-  --hidden-import "PyQt6.QtCore" \
-  --hidden-import "PyQt6.QtGui" \
-  --hidden-import "PyQt6.QtWidgets" \
-  --hidden-import "pygments" \
-  --hidden-import "PIL" \
-  --noconfirm --clean
 ```
 
 ---
@@ -140,27 +121,29 @@ rm -rf /tmp/ArcVault.iconset
 
 ### macOS:
 ```bash
+# Run the portable standalone binary:
+./dist/ArcVault
+
+# Or launch the macOS app bundle:
 open dist/ArcVault.app
-# Or run binary directly from terminal:
-./dist/ArcVault/ArcVault
 ```
 
 ### Linux:
 ```bash
-./dist/ArcVault/ArcVault
+./dist/ArcVault
 ```
 
 ### Windows:
+Double-click `dist\ArcVault.exe` or execute from Command Prompt / PowerShell:
 ```cmd
-dist\ArcVault\ArcVault.exe
+.\dist\ArcVault.exe
 ```
 
 ---
 
-## 🧪 Testing
-
-To ensure all unit tests pass before compiling:
-
+## 🔍 CLI Inspection
+The portable binary also supports command-line flags:
 ```bash
-.venv/bin/python3 -m unittest discover tests -v
+./dist/ArcVault --version
+./dist/ArcVault --help
 ```

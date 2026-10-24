@@ -13,6 +13,15 @@ from arc_vault.gui.main_window import MainWindow
 
 def main() -> int:
     """Initialize and run ArcVault application."""
+    if "--version" in sys.argv or "-v" in sys.argv:
+        print(f"{__app_name__} v{__version__}")
+        return 0
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(f"{__app_name__} v{__version__} - Encrypted Archive Explorer")
+        print("Usage: arcvault [OPTIONS]")
+        print("  -v, --version  Show application version and exit")
+        print("  -h, --help     Show this help message and exit")
+        return 0
     # High DPI attributes
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough

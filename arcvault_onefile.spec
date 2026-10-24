@@ -1,0 +1,78 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+import os
+import sys
+from pathlib import Path
+
+block_cipher = None
+project_root = Path(os.path.abspath(".")).resolve()
+
+icon_file = "arc_vault/resources/ArcVault.icns" if sys.platform == "darwin" else "arc_vault/resources/icon.png"
+
+a = Analysis(
+    ["run.py"],
+    pathex=[str(project_root)],
+    binaries=[],
+    datas=[
+        ("arc_vault/resources", "arc_vault/resources"),
+    ],
+    hiddenimports=[
+        "PyQt6.QtCore",
+        "PyQt6.QtGui",
+        "PyQt6.QtWidgets",
+        "pygments",
+        "pygments.lexers",
+        "pygments.formatters",
+        "pygments.styles",
+        "PIL",
+        "PIL.Image",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=["tkinter", "matplotlib", "numpy", "scipy", "unittest"],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name="ArcVault",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=icon_file,
+)
+
+if sys.platform == "darwin" and os.environ.get("BUILD_MACOS_BUNDLE", "0") == "1":
+    app = BUNDLE(
+        exe,
+        name="ArcVault.app",
+        icon=icon_file,
+        bundle_identifier="com.arcvault.desktop",
+        info_plist={
+            "CFBundleShortVersionString": "2.0.0",
+            "CFBundleVersion": "2.0.0",
+            "NSHighResolutionCapable": "True",
+            "CFBundleDisplayName": "ArcVault",
+            "CFBundleName": "ArcVault",
+        },
+    )

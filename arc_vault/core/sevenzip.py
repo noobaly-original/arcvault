@@ -37,15 +37,37 @@ class SevenZip:
     def find_binary(cls) -> Optional[str]:
         """Detect the 7-Zip executable path across macOS, Linux, and Windows."""
         # 1. Environment variable
-        env_override = os.environ.get("ARCVUULT_7Z_PATH") or os.environ.get("SEVENZIP_PATH")
+        env_override = (
+            os.environ.get("ARCVAULT_7Z_PATH")
+            or os.environ.get("ARCVUULT_7Z_PATH")
+            or os.environ.get("SEVENZIP_PATH")
+        )
         if env_override and Path(env_override).is_file():
             return env_override
 
-        # 2. Check PATH for standard binary names
+        # Candidate executable names per platform
         candidates = ["7zz", "7z", "7za", "nanazip"]
         if sys.platform == "win32":
             candidates = ["7z.exe", "7za.exe", "nanazip.exe"]
 
+        # 2. Portable locations: next to executable, in _MEIPASS, or current working directory
+        portable_dirs = []
+        try:
+            portable_dirs.append(Path(sys.executable).resolve().parent)
+        except Exception:
+            pass
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            portable_dirs.append(Path(meipass))
+        portable_dirs.append(Path.cwd())
+
+        for p_dir in portable_dirs:
+            for cand in candidates:
+                cand_path = p_dir / cand
+                if cand_path.is_file() and os.access(cand_path, os.X_OK if sys.platform != "win32" else os.F_OK):
+                    return str(cand_path)
+
+        # 3. Check PATH for standard binary names
         for cand in candidates:
             found = shutil.which(cand)
             if found:
