@@ -76,8 +76,8 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.arcvault.desktop",
         info_plist={
-            "CFBundleShortVersionString": "1.0.0",
-            "CFBundleVersion": "1.0.0",
+            "CFBundleShortVersionString": "2.0.0",
+            "CFBundleVersion": "2.0.0",
             "NSHighResolutionCapable": "True",
             "CFBundleDisplayName": "ArcVault",
             "CFBundleName": "ArcVault",
