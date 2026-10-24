@@ -46,7 +46,7 @@ class UnlockVaultDialog(QDialog):
         # Header with Vault icon
         header = QHBoxLayout()
         icon_lbl = QLabel(self)
-        icon_lbl.setPixmap(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=32).pixmap(32, 32))
+        icon_lbl.setPixmap(IconProvider.get_pixmap("vault", dark_mode=self.dark_mode, size=32))
         header.addWidget(icon_lbl)
 
         title_layout = QVBoxLayout()
@@ -173,7 +173,7 @@ class CreateVaultDialog(QDialog):
         # Header
         header = QHBoxLayout()
         icon_lbl = QLabel(self)
-        icon_lbl.setPixmap(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=32).pixmap(32, 32))
+        icon_lbl.setPixmap(IconProvider.get_pixmap("vault", dark_mode=self.dark_mode, size=32))
         header.addWidget(icon_lbl)
 
         title_layout = QVBoxLayout()

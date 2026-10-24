@@ -102,7 +102,7 @@ class VaultSidebar(QWidget):
         # Top App Brand Header
         brand_layout = QHBoxLayout()
         self.brand_icon = QLabel(self)
-        self.brand_icon.setPixmap(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=24).pixmap(24, 24))
+        self.brand_icon.setPixmap(IconProvider.get_pixmap("vault", dark_mode=self.dark_mode, size=24))
         brand_layout.addWidget(self.brand_icon)
 
         self.brand_title = QLabel("ArcVault", self)
@@ -187,7 +187,7 @@ class VaultSidebar(QWidget):
 
     def update_icons(self) -> None:
         self.brand_icon.setPixmap(
-            IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=24).pixmap(24, 24)
+            IconProvider.get_pixmap("vault", dark_mode=self.dark_mode, size=24)
         )
         self.btn_add_vault.setIcon(
             IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=16)

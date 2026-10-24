@@ -1,4 +1,4 @@
-"""High-resolution vector icon provider for ArcVault."""
+"""High-resolution vector icon provider for ArcVault with Retina and multi-DPI scaling."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from PyQt6.QtCore import QByteArray, QSize, Qt
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtWidgets import QApplication
 
 from arc_vault.core.models import FileCategory
 
@@ -129,10 +130,10 @@ SVG_ICONS = {
     "refresh": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>""",
     "arrow_left": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>""",
     "arrow_up": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>""",
-    "sun": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2 daylight"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>""",
+    "sun": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>""",
     "moon": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>""",
     "eye": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>""",
-    "eye_off": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24 daylight"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/></svg>""",
+    "eye_off": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/></svg>""",
     "search": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>""",
 
     # Add File (ingoing arrow: bringing files INTO vault)
@@ -190,9 +191,10 @@ CATEGORY_COLORS_LIGHT = {
 
 
 class IconProvider:
-    """Caches and provides SVG-based QIcons with proper theme color rendering."""
+    """Caches and provides SVG-based QIcons and QPixmaps with crisp Retina scaling."""
 
     _cache: Dict[str, QIcon] = {}
+    _pixmap_cache: Dict[str, QPixmap] = {}
 
     @classmethod
     def get_category_icon(cls, category: FileCategory, dark_mode: bool = True, size: int = 24) -> QIcon:
@@ -207,8 +209,25 @@ class IconProvider:
         return cls.get_icon(svg_key, color=color, dark_mode=dark_mode, size=size)
 
     @classmethod
+    def get_category_pixmap(
+        cls,
+        category: FileCategory,
+        size: int = 64,
+        dark_mode: bool = True,
+        dpr: Optional[float] = None,
+    ) -> QPixmap:
+        """Directly render a file category icon as a crisp Retina high-DPI QPixmap."""
+        svg_key = category.value if category.value in SVG_ICONS else "generic"
+        color_map = CATEGORY_COLORS_DARK if dark_mode else CATEGORY_COLORS_LIGHT
+        color = color_map.get(category, "#94A3B8" if dark_mode else "#64748B")
+        return cls.get_pixmap(svg_key, size=size, color=color, dark_mode=dark_mode, dpr=dpr)
+
+    @classmethod
     def get_icon(cls, name: str, color: Optional[str] = None, dark_mode: bool = True, size: int = 24) -> QIcon:
-        """Get or render SVG icon with specified color and size."""
+        """
+        Get or render SVG icon populated with standard and Retina (2x/3x) pixmaps
+        with antialiasing to prevent pixelation on MacBooks and HiDPI displays.
+        """
         if color is None:
             color = "#F1F5F9" if dark_mode else "#1E293B"
 
@@ -223,17 +242,89 @@ class IconProvider:
         svg_data = svg_template.format(color=color).encode("utf-8")
         renderer = QSvgRenderer(QByteArray(svg_data))
 
-        # Render onto transparent QPixmap
-        pixmap = QPixmap(size, size)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter)
-        painter.end()
+        icon = QIcon()
 
-        icon = QIcon(pixmap)
+        # Add requested base size at 1x first so availableSizes()[0].width() matches size
+        for dpr in (1.0, 2.0, 3.0):
+            phys = int(round(size * dpr))
+            pixmap = QPixmap(phys, phys)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            pixmap.setDevicePixelRatio(dpr)
+
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            renderer.render(painter)
+            painter.end()
+
+            icon.addPixmap(pixmap)
+
+        # Also register common UI sizes so scaling across any Qt component remains razor sharp
+        common_sizes = [16, 18, 20, 24, 32, 48, 64, 128]
+        for s in common_sizes:
+            if s == size:
+                continue
+            for dpr in (1.0, 2.0, 3.0):
+                phys = int(round(s * dpr))
+                pixmap = QPixmap(phys, phys)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                pixmap.setDevicePixelRatio(dpr)
+
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                renderer.render(painter)
+                painter.end()
+
+                icon.addPixmap(pixmap)
+
         cls._cache[cache_key] = icon
         return icon
 
     @classmethod
+    def get_pixmap(
+        cls,
+        name: str,
+        size: int = 24,
+        color: Optional[str] = None,
+        dark_mode: bool = True,
+        dpr: Optional[float] = None,
+    ) -> QPixmap:
+        """Render SVG directly into a high-DPI Retina QPixmap with proper devicePixelRatio."""
+        if color is None:
+            color = "#F1F5F9" if dark_mode else "#1E293B"
+
+        if dpr is None:
+            app = QApplication.instance()
+            screen = app.primaryScreen() if app else None
+            dpr = screen.devicePixelRatio() if screen else 2.0
+
+        cache_key = f"{name}_{color}_{size}_{dpr}"
+        if cache_key in cls._pixmap_cache:
+            return cls._pixmap_cache[cache_key]
+
+        svg_template = SVG_ICONS.get(name)
+        if not svg_template:
+            svg_template = SVG_ICONS["generic"]
+
+        svg_data = svg_template.format(color=color).encode("utf-8")
+        renderer = QSvgRenderer(QByteArray(svg_data))
+
+        phys = int(round(size * dpr))
+        pixmap = QPixmap(phys, phys)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.setDevicePixelRatio(dpr)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        renderer.render(painter)
+        painter.end()
+
+        cls._pixmap_cache[cache_key] = pixmap
+        return pixmap
+
+    @classmethod
     def clear_cache(cls) -> None:
         cls._cache.clear()
+        cls._pixmap_cache.clear()

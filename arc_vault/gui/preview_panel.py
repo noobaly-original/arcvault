@@ -239,7 +239,7 @@ class PreviewPanel(QWidget):
     def set_theme(self, dark_mode: bool) -> None:
         self.dark_mode = dark_mode
         self.lbl_empty_icon.setPixmap(
-            IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=36).pixmap(36, 36)
+            IconProvider.get_pixmap("preview", dark_mode=self.dark_mode, size=36)
         )
         self.btn_edit_text.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
         self.btn_save_text.setIcon(IconProvider.get_icon("save", dark_mode=self.dark_mode, size=16))
@@ -261,7 +261,7 @@ class PreviewPanel(QWidget):
         self.btn_open_external.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.lbl_empty_icon.setPixmap(
-            IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=36).pixmap(36, 36)
+            IconProvider.get_pixmap("preview", dark_mode=self.dark_mode, size=36)
         )
         self.stack.setCurrentIndex(0)
 
@@ -411,8 +411,9 @@ class PreviewPanel(QWidget):
         self.btn_edit_text.setVisible(False)
         self.btn_save_text.setVisible(False)
         self.btn_cancel_edit.setVisible(False)
-        icon = IconProvider.get_category_icon(item.category, dark_mode=self.dark_mode, size=64)
-        self.card_icon.setPixmap(icon.pixmap(64, 64))
+        self.card_icon.setPixmap(
+            IconProvider.get_category_pixmap(item.category, dark_mode=self.dark_mode, size=64)
+        )
         self.card_name.setText(item.name)
 
         if item.category == FileCategory.EXECUTABLE_WINDOWS:

@@ -2,42 +2,50 @@
 
 **ArcVault** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
 
-Unlike traditional vault systems (such as Cryptomator) that rely on kernel virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **ArcVault** takes a clean, file-centric approach:
-- Your vault is simply a standard folder on your disk.
-- Inside the vault root, top-level directories are stored directly as **AES-256 encrypted `.7z` archives** (termed *Entry Points*, such as `photos.7z`, `documents.7z`, `finances.7z`).
-- **Complete Vendor Freedom**: If ArcVault is not installed, you can simply open any of the `.7z` files directly using **7-Zip, NanaZip, Keka, or PeaZip** on Windows, macOS, or Linux!
+Unlike traditional vault systems (such as Cryptomator) that rely on complex virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **ArcVault** takes a clean, file-centric approach:
+- Your vault is simply a standard folder on your disk or cloud sync folder (Google Drive, MEGA, Dropbox, OneDrive).
+- The vault uses a **decoupled, chunked storage architecture (V2)** where virtual folder entry points house encrypted metadata, while file contents are stored in uncompressed, store-mode AES-256 encrypted chunks under `arc-data/`.
+- **Zero Re-Archiving Overhead**: Adding or deleting a file never rewrites existing archive contents.
+- **Complete Vendor Freedom**: All encrypted chunks are standard 7-Zip archives with AES-256 header encryption (`-mhe=on`). You can inspect or extract any chunk directly using **7-Zip, NanaZip, Keka, or PeaZip** on Windows, macOS, or Linux!
 
 ---
 
 ## ✨ Features
 
-- **Blazing Fast & Lightweight**: Zero background mount daemons, zero kernel drivers.
-- **AES-256 Header Encryption**: All archive headers (`-mhe=on`) are encrypted. File names and directory hierarchies cannot be seen without the master password.
-- **Fast & Reliable Archive Editing**:
-  - **In-App Direct Editing**: Edit text, notes, JSON, scripts, and code files directly in the preview panel with `Save` (Ctrl+S / Cmd+S). The app immediately stages and updates the `.7z` archive using 7-Zip's multithreaded fast update engine.
-  - **External Editor Auto-Sync**: Right-click any file and select *Edit in External App...* (or click the button in Preview). ArcVault extracts the file to a secure watched staging area with `QFileSystemWatcher`. Whenever you hit save in your external editor (VS Code, TextEdit, Notepad, GIMP, etc.), ArcVault detects the change and automatically re-encrypts the updated file back into the `.7z` archive!
+- **Blazing Fast Store-Mode Encryption**: Bypasses CPU-heavy compression (`-mx=0`) while enforcing maximum AES-256 header and data encryption (`-mhe=on`), achieving native SSD throughput (500+ MB/s).
+- **Decoupled Virtual Entry Points & `arc-data/`**:
+  - Top-level archives (`photos.7z`, `documents.7z`) act as **virtual folders** holding lightweight AES-256 encrypted metadata.
+  - Actual contents are organized under `arc-data/{random_ep_id}/{random_item_id}/`.
+  - Adding or deleting an item updates only that item's directory and a ~1 KB metadata archive, taking milliseconds instead of minutes.
+  - Moving and renaming files or folders are instant metadata operations with zero disk re-writing.
+- **Large File 1 GB Chunk Shredding**:
+  - Files $> 1\text{ GB}$ are automatically sliced into $1\text{ GB}$ encrypted chunks (`chunk_000.7z`, `chunk_001.7z`, etc.).
+  - Files $\le 1\text{ GB}$ skip shredding and are stored directly in a single `chunk_000.7z`.
+  - Multi-chunk export uses streaming $1\text{ MB}$ buffers, keeping RAM consumption under $50\text{ MB}$ regardless of file size.
+  - Safeguard: Files $> 1\text{ GB}$ have preview and external editing disabled to protect system memory and disk, with export remaining fully functional.
+- **Cloud Storage Friendly & Atomic Swaps**:
+  - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
+  - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
+- **Retina & High-DPI Display Support**:
+  - Vector SVG icon engine populates standard and Retina (2x/3x) pixmaps with full antialiasing and smooth transformations, ensuring crisp rendering on MacBooks, Retina screens, and 4K monitors.
+- **Fast & Reliable In-App & External Editing**:
+  - **In-App Direct Editing**: Edit text, notes, JSON, and code files directly in the preview panel with `Save` (Ctrl+S / Cmd+S).
+  - **External Editor Auto-Sync**: Right-click any file and select *Edit with Default App*. ArcVault extracts the file to a secure staging area watched with `QFileSystemWatcher`. Saving in your external editor (VS Code, TextEdit, Notepad) immediately updates the encrypted vault.
 - **Cross-Platform Drag-and-Drop**:
-  - **Drop onto Folders**: Dragging external files from Finder / Explorer and dropping them directly onto a subfolder row in the table automatically encrypts and adds them into that specific nested directory.
-  - **Drop onto Sidebar Entry Points**: Drag files directly onto any `.7z` archive listed in the sidebar to add them to that entry point.
-  - **Vault Root Drop Routing**: Dropping files at the vault root allows instant selection or creation of an entry point.
-  - **Drag to Export**: Click and drag any file or group of files from ArcVault out to your Desktop or Finder to automatically decrypt and export them.
-- **Entry-Point Vault Architecture**:
-  - The vault root houses encrypted category entry points (`photos.7z`, `documents.7z`, etc.).
-  - Navigating into an entry point seamlessly explores all nested directories and files inside.
+  - **Drop onto Folders**: Dragging external files from Finder / Explorer and dropping them directly onto a subfolder row in the table encrypts and adds them into that specific directory.
+  - **Drop Folders**: Dragging entire folders adds the directory hierarchy into the vault.
+  - **Drag to Export**: Drag any file or selection from ArcVault out to your Desktop or Finder to automatically decrypt and export it.
 - **Rich Previews**:
   - **Text & Code**: Syntax-highlighted viewer (powered by Pygments) for Python, JavaScript, JSON, Markdown, HTML, CSS, C/C++, Rust, Shell scripts, etc.
   - **Images**: High-resolution image viewer with zoom controls, smooth scaling, and dimension badges (PNG, JPG, WebP, GIF, SVG, BMP, ICO).
-  - **Executables & Binaries**: Clear metadata cards with compression ratios, CRC32 checksums, and distinct badges.
-- **Specialized Vector Icons**:
-  - Crisp vector SVG icons rendered at native display resolution.
-  - Distinctive badges and icons for **Windows executables** (`.exe`, `.bat`, `.cmd`, `.msi`), **macOS bundles** (`.app`, `.dmg`, `.pkg`), and **Unix/Linux scripts** (`.sh`, `.bin`, `.elf`).
-- **Minimalistic & Modern UI**:
+  - **Executables & Binaries**: Clear metadata cards with distinct badges and vector icons for **Windows executables** (`.exe`, `.bat`, `.cmd`), **macOS bundles** (`.app`, `.dmg`, `.pkg`), and **Unix/Linux binaries** (`.sh`, `.bin`).
+- **Real-Time Logs Panel**:
+  - Built-in logging drawer capturing application events and 7-Zip CLI execution with automatic password masking (`-p***`).
+- **Minimalistic & Modern Dual-Mode UI**:
   - Dual-mode theme engine with instant **Light Mode** and **Dark Mode** toggle.
+  - Window placement, size, splitters, and theme preference persist across restarts.
   - Interactive breadcrumb navigation bar (`Vault Root › photos › family`).
   - Real-time search and filter bar.
-- **Cryptomator-Style Vault Switcher**:
-  - Easily manage, add, create, or switch between multiple vaults in the left sidebar.
-  - Secure in-memory password caching during session (purged immediately on Lock or App Close).
 
 ---
 
@@ -51,17 +59,16 @@ Unlike traditional vault systems (such as Cryptomator) that rely on kernel virtu
   - **Windows**: Install 7-Zip or NanaZip.
 
 ### 2. Installation
-Clone this repository and install dependencies:
 ```bash
 git clone https://github.com/your-username/archive-explorer.git
 cd archive-explorer
 
-# Using uv (fastest):
+# Using uv (recommended):
 uv venv .venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
 
-# Or using standard pip:
+# Or using standard python:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -69,8 +76,6 @@ pip install -r requirements.txt
 
 ### 3. Launching ArcVault
 ```bash
-./run.py
-# or
 python3 run.py
 ```
 
@@ -78,42 +83,44 @@ python3 run.py
 
 ## 📁 Vault Structure Explained
 
-When ArcVault creates a vault named "Personal Vault", the filesystem folder looks like this:
+When ArcVault creates a vault named `MyVault`, the filesystem structure looks like this:
 
 ```text
-Personal Vault/
-├── .arcvault            # Small JSON vault descriptor (ID, name, metadata)
-├── .vault_check.7z      # Micro-archive for instantaneous password validation
-├── photos.7z            # Entry Point: Houses photos, nested albums, etc.
-├── documents.7z         # Entry Point: Houses PDFs, spreadsheets, notes
-└── work.7z              # Entry Point: Houses code projects, assets
+MyVault/
+├── .arcvault                       # Vault metadata descriptor (ID, name, version)
+├── .vault_check.7z                 # Fast password verification canary
+├── photos.7z                       # Virtual Entry Point: Encrypted metadata.json
+├── documents.7z                    # Virtual Entry Point: Encrypted metadata.json
+└── arc-data/                       # Store-mode AES-256 encrypted payload
+    ├── K9mB3vXp8Q1L/              # Entry point data directory (random alphanumeric ID)
+    │   ├── a1b2c3d4e5f6/          # Item folder for "vacation.jpg" (<= 1 GB)
+    │   │   └── chunk_000.7z       # AES-256 store-mode chunk (-mx=0, -mhe=on)
+    │   └── 9z8y7x6w5v4u/          # Item folder for "drone_4k.mp4" (> 1 GB)
+    │       ├── chunk_000.7z       # 1 GB encrypted chunk
+    │       ├── chunk_001.7z       # 1 GB encrypted chunk
+    │       └── chunk_002.7z       # Remainder encrypted chunk
+    └── Z7y4W1v2U9t0/              # Entry point data directory for 'documents'
 ```
 
-Inside `photos.7z`, files are organized with full directory hierarchy:
-```text
-photos.7z
-├── family/
-│   ├── vacation_2026.jpg
-│   └── birthday.png
-└── landscape.png
-```
-
-You can double-click `photos.7z` in Finder or Explorer, type your password in 7-Zip/Keka/NanaZip, and extract or view files at any time, even without ArcVault!
+- When viewing `photos` inside ArcVault, the application projects the virtual items seamlessly as single unified files and directories.
+- `metadata.json` is automatically hidden from the user view.
+- Legacy V1 monolithic archives are automatically migrated to V2 chunked format upon opening.
 
 ---
 
 ## 🧪 Running Tests
 
-The test suite covers backend encryption, fast archive editing, password validation, archive manipulations, and headless GUI components:
+The test suite covers backend encryption, V2 chunking/shredding, atomic swapping, backup recovery, password validation, and GUI components:
 
 ```bash
-python3 -m unittest discover tests
+.venv/bin/python3 -m unittest discover tests -v
 ```
 
 ---
 
 ## 🔒 Security Model
 
-- **Encryption**: AES-256 with 7z header encryption (`-mhe=on`), preventing enumeration of file names, timestamps, or folder structures without the master key.
-- **Memory Safety**: Passwords are held strictly in process memory while the vault is unlocked, and cleared as soon as the user clicks "Lock" or closes the app.
-- **Preview Isolation**: Preview extractions take place in temporary, permission-restricted directories and are removed on lock or exit.
+- **Encryption**: Standard AES-256 with 7-Zip header encryption (`-mhe=on`). File names, chunk sizes, and internal folder hierarchies cannot be inspected without the master key.
+- **Atomic Operations**: All metadata changes are written to temporary scratch archives and atomically swapped into place (`os.replace`), preventing partial writes and synchronization corruption.
+- **Memory Safety**: Master passwords and encryption keys exist only in process RAM while unlocked, and are completely purged when the vault is locked or the application closes.
+- **Isolated Staging**: Previews and temporary extraction operations run inside permission-restricted directories cleaned up automatically on lock or termination.
