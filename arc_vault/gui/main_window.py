@@ -447,6 +447,14 @@ class MainWindow(QMainWindow):
             self.current_subfolder = item.path.strip("/")
             self.refresh_current_view()
         else:
+            if item.size > 1024 * 1024 * 1024:
+                QMessageBox.information(
+                    self,
+                    "File Over 1 GB",
+                    f"'{item.name}' is {format_size(item.size)} (over 1 GB limit for in-app preview/editing).\n\n"
+                    "Please use 'Export / Save As' to extract this file to disk.",
+                )
+                return
             self._on_file_selected(item)
 
     # --- Drag & Drop Implementations ---
@@ -569,6 +577,15 @@ class MainWindow(QMainWindow):
     def _start_external_editing(self, item: ArchiveItem) -> None:
         """Extract file to watched directory and launch external editor."""
         if not self.vault or not self.vault.is_unlocked:
+            return
+
+        if item.size > 1024 * 1024 * 1024:
+            QMessageBox.information(
+                self,
+                "File Over 1 GB",
+                f"'{item.name}' is {format_size(item.size)} (over 1 GB limit for external editing).\n\n"
+                "Please use 'Export / Save As' to extract this file to disk.",
+            )
             return
 
         staged_path = self.vault.extract_file_for_editing(item.entry_point_name, item.path)

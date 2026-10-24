@@ -254,6 +254,64 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertIsNotNone(preview)
         self.assertEqual(preview.read_text(encoding="utf-8"), "inner content")
 
+    def test_v2_chunking_shredding_and_reassembly(self) -> None:
+        """Verify V2 chunk shredding (>1GB logic tested with 5KB test chunks) and projection."""
+        vault = Vault.create_vault(
+            self.root_path,
+            name="Chunk Vault",
+            password=self.password,
+            initial_entry_points=["storage"],
+            sevenzip=self.sz,
+            chunk_size=5000,  # 5KB chunk size for testing shredding without consuming gigabytes
+        )
+
+        # 1. Create a 12 KB file that will be shredded into 3 chunks
+        payload = b"PART_1_CONTENT_" * 350 + b"PART_2_CONTENT_" * 350 + b"PART_3_FINAL"
+        total_len = len(payload)
+        test_file = self.root_path / "big_video.mp4"
+        test_file.write_bytes(payload)
+
+        # 2. Add to entry point
+        self.assertTrue(vault.add_files("storage", [test_file]))
+
+        # 3. Check arc-data directory structure
+        meta = vault._v2_metadata["storage"]
+        ep_dir = vault.arc_data_dir / meta.ep_dir_id
+        self.assertTrue(ep_dir.exists())
+
+        item_meta = meta.items["big_video.mp4"]
+        self.assertEqual(item_meta.size, total_len)
+        self.assertGreaterEqual(len(item_meta.chunks), 3)
+
+        item_dir = ep_dir / item_meta.item_id
+        self.assertTrue(item_dir.exists())
+        self.assertTrue((item_dir / "chunk_000.7z").exists())
+        self.assertTrue((item_dir / "chunk_001.7z").exists())
+
+        # 4. Check projection in directory: single file with total size, metadata.json excluded
+        items = vault.get_items_in_directory("storage", "")
+        item_names = [i.name for i in items]
+        self.assertIn("big_video.mp4", item_names)
+        self.assertNotIn("metadata.json", item_names)  # Metadata must never be rendered!
+        self.assertNotIn(".arcvault_init", item_names)
+
+        proj_item = next(i for i in items if i.name == "big_video.mp4")
+        self.assertEqual(proj_item.size, total_len)
+        self.assertFalse(proj_item.is_dir)
+
+        # 5. Export and verify complete byte-for-byte reassembly
+        export_dir = self.root_path / "reconstructed"
+        self.assertTrue(vault.export_items("storage", ["big_video.mp4"], export_dir))
+        reconstructed_file = export_dir / "big_video.mp4"
+        self.assertTrue(reconstructed_file.exists())
+        self.assertEqual(reconstructed_file.read_bytes(), payload)
+
+        # 6. Test safeguard for files over 1GB
+        proj_item.size = 1024 * 1024 * 1024 + 100  # Fake > 1GB
+        meta.items["big_video.mp4"].size = 1024 * 1024 * 1024 + 100
+        preview_large = vault.extract_file_for_preview("storage", "big_video.mp4")
+        self.assertIsNone(preview_large)  # Must be blocked!
+
 
 if __name__ == "__main__":
     unittest.main()

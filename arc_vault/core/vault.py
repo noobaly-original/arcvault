@@ -1,4 +1,4 @@
-"""Vault manager orchestrating root directory archives, entry points, and encryption."""
+"""Vault manager orchestrating root directory archives, entry points, and V2 chunked storage."""
 
 from __future__ import annotations
 
@@ -11,8 +11,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from arc_vault.core.models import ArchiveItem, EntryPoint, VaultMetadata, classify_file
+from arc_vault.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file
 from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
+from arc_vault.core.storage_v2 import (
+    DEFAULT_CHUNK_SIZE,
+    METADATA_FILENAME,
+    V2EntryPointMetadata,
+    V2ItemMetadata,
+    V2StorageEngine,
+    generate_random_id,
+)
 from arc_vault.logger import log_info, log_warning
 
 
@@ -22,18 +30,32 @@ class VaultUnlockError(Exception):
 
 
 class Vault:
-    """Manages an ArcVault root directory and its encrypted 7z entry points."""
+    """
+    Manages an ArcVault root directory, its encrypted metadata entry points,
+    and the decoupled chunked storage in 'arc-data/'.
+    """
 
     MARKER_FILENAME = ".arcvault"
     CHECK_FILENAME = ".vault_check.7z"
+    ARC_DATA_DIRNAME = "arc-data"
 
-    def __init__(self, root_dir: Path, sevenzip: Optional[SevenZip] = None) -> None:
+    def __init__(
+        self,
+        root_dir: Path,
+        sevenzip: Optional[SevenZip] = None,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> None:
         self.root_dir = root_dir.resolve()
         self.sevenzip = sevenzip or SevenZip()
+        self.chunk_size = chunk_size
+        self.v2_engine = V2StorageEngine(self.sevenzip, chunk_size=chunk_size)
+        self.arc_data_dir = self.root_dir / self.ARC_DATA_DIRNAME
+
         self.metadata: Optional[VaultMetadata] = None
         self._password: Optional[str] = None
         self.is_unlocked: bool = False
         self.entry_points: Dict[str, EntryPoint] = {}
+        self._v2_metadata: Dict[str, V2EntryPointMetadata] = {}
         self._cache: Dict[str, List[ArchiveItem]] = {}
         self._temp_preview_dir: Optional[tempfile.TemporaryDirectory] = None
         self._edit_staging_dir: Optional[tempfile.TemporaryDirectory] = None
@@ -57,7 +79,6 @@ class Vault:
     def _read_metadata(self) -> None:
         """Read .arcvault metadata if it exists."""
         marker = self.root_dir / self.MARKER_FILENAME
-        # Also check fallback .{app}_vault
         if not marker.exists():
             alt_marker = self.root_dir / ".arcvault_vault"
             if alt_marker.exists():
@@ -69,7 +90,7 @@ class Vault:
                 self.metadata = VaultMetadata(
                     name=data.get("name", self.root_dir.name),
                     vault_id=data.get("vault_id", str(uuid.uuid4())),
-                    version=data.get("version", "1.0"),
+                    version=data.get("version", "2.0"),
                     created_at=data.get("created_at", ""),
                     encryption=data.get("encryption", "AES-256"),
                 )
@@ -77,7 +98,6 @@ class Vault:
             except Exception:
                 pass
 
-        # Default metadata if marker doesn't exist yet
         self.metadata = VaultMetadata(
             name=self.root_dir.name,
             vault_id=str(uuid.uuid4()),
@@ -92,49 +112,52 @@ class Vault:
         password: str,
         initial_entry_points: Optional[List[str]] = None,
         sevenzip: Optional[SevenZip] = None,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> Vault:
-        """Create a new vault directory with marker, verification check, and initial entry points."""
+        """Create a new vault directory with marker, verification check, and arc-data folder."""
         sz = sevenzip or SevenZip()
         root_dir.mkdir(parents=True, exist_ok=True)
+        arc_data = root_dir / cls.ARC_DATA_DIRNAME
+        arc_data.mkdir(parents=True, exist_ok=True)
 
         vault_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         metadata_dict = {
             "name": name,
             "vault_id": vault_id,
-            "version": "1.0",
+            "version": "2.0",
             "created_at": created_at,
             "encryption": "AES-256",
             "check_archive": cls.CHECK_FILENAME,
+            "storage_mode": "v2_chunked_arc_data",
         }
         marker_file = root_dir / cls.MARKER_FILENAME
         marker_file.write_text(json.dumps(metadata_dict, indent=2), encoding="utf-8")
 
-        # Create the small vault check archive to allow fast password testing
+        # Fast password verification archive
         check_path = root_dir / cls.CHECK_FILENAME
         sz.create_empty_archive(check_path, password)
 
-        # Create requested initial entry points (e.g. "photos", "documents")
+        vault = cls(root_dir, sz, chunk_size=chunk_size)
+        vault._password = password
+        vault.is_unlocked = True
+
+        # Initialize requested initial entry points in V2 format
         if initial_entry_points:
             for ep_name in initial_entry_points:
                 clean_name = ep_name.strip()
                 if clean_name:
-                    ep_path = root_dir / f"{clean_name}.7z"
-                    if not ep_path.exists():
-                        sz.create_empty_archive(ep_path, password)
+                    vault.create_entry_point(clean_name)
 
         log_info(f"Created new vault '{name}' at {root_dir}", category="SECURITY")
-        vault = cls(root_dir, sz)
-        vault.unlock(password)
         return vault
 
     def unlock(self, password: str) -> bool:
-        """
-        Verify password and unlock vault.
-        Checks against .vault_check.7z if present, or against any .7z file in the vault root.
-        """
+        """Verify password and unlock vault, loading V2 metadata."""
         if not self.root_dir.exists():
             raise VaultUnlockError(f"Vault folder '{self.root_dir}' does not exist.")
+
+        self.arc_data_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Try checking against check archive
         check_file = self.root_dir / self.CHECK_FILENAME
@@ -143,7 +166,6 @@ class Vault:
                 log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                 return False
         else:
-            # 2. Check against any .7z file in root
             sevenz_files = [
                 f for f in self.root_dir.glob("*.7z")
                 if f.name != self.CHECK_FILENAME
@@ -164,11 +186,12 @@ class Vault:
         return True
 
     def lock(self) -> None:
-        """Lock the vault, clearing cached passwords and temp previews/staging."""
+        """Lock vault, clearing cached passwords, metadata, and staging dirs."""
         vault_title = self.metadata.name if self.metadata else self.root_dir.name
         self._password = None
         self.is_unlocked = False
         self.entry_points.clear()
+        self._v2_metadata.clear()
         self._cache.clear()
         if self._temp_preview_dir:
             try:
@@ -191,19 +214,17 @@ class Vault:
         return self._password
 
     def get_preview_temp_dir(self) -> Path:
-        """Get or create isolated temp directory for previews."""
         if not self._temp_preview_dir:
             self._temp_preview_dir = tempfile.TemporaryDirectory(prefix="arcvault_preview_")
         return Path(self._temp_preview_dir.name)
 
     def get_edit_staging_dir(self) -> Path:
-        """Get or create isolated temp directory for external editing staging."""
         if not self._edit_staging_dir:
             self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="arcvault_watched_edit_")
         return Path(self._edit_staging_dir.name)
 
     def refresh_entry_points(self) -> Dict[str, EntryPoint]:
-        """Scan vault root for .7z files (entry points)."""
+        """Scan vault root for .7z files and load V2 metadata."""
         if not self.is_unlocked:
             return {}
 
@@ -213,17 +234,108 @@ class Vault:
                 continue
 
             ep_name = file.stem
+            meta = self._load_or_migrate_entry_point(ep_name, file)
+            self._v2_metadata[ep_name] = meta
+
+            # Calculate total size on disk (archive file + chunk files in arc-data/{ep_dir_id})
             size_on_disk = file.stat().st_size
+            ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+            if ep_data_dir.exists():
+                for p in ep_data_dir.rglob("*.7z"):
+                    try:
+                        size_on_disk += p.stat().st_size
+                    except Exception:
+                        pass
+
+            item_count = sum(1 for it in meta.items.values() if not it.is_dir)
             self.entry_points[ep_name] = EntryPoint(
                 name=ep_name,
                 archive_file=file,
                 size_on_disk=size_on_disk,
+                item_count=item_count,
             )
 
         return self.entry_points
 
+    def _load_or_migrate_entry_point(self, ep_name: str, ep_file: Path) -> V2EntryPointMetadata:
+        """Load V2 metadata. If legacy V1 monolithic archive, migrate seamlessly."""
+        meta = self.v2_engine.load_metadata(ep_file, self.password)
+        if meta is not None:
+            return meta
+
+        # Legacy V1 archive detected! Auto-migrate into V2
+        log_info(f"Migrating legacy entry point '{ep_name}.7z' to V2 chunked architecture...")
+        ep_dir_id = generate_random_id(12)
+        ep_data_dir = self.arc_data_dir / ep_dir_id
+        ep_data_dir.mkdir(parents=True, exist_ok=True)
+
+        meta = V2EntryPointMetadata(
+            version="2.0",
+            entry_point_name=ep_name,
+            ep_dir_id=ep_dir_id,
+            items={},
+        )
+
+        try:
+            legacy_items = self.sevenzip.list_archive(ep_file, self.password, entry_point_name=ep_name)
+            with tempfile.TemporaryDirectory(prefix="arc_v1_migration_") as ext_dir:
+                ext_path = Path(ext_dir)
+                self.sevenzip.extract_to_destination(ep_file, [], self.password, ext_path)
+
+                for item in legacy_items:
+                    if item.name in (METADATA_FILENAME, ".arcvault_init"):
+                        continue
+                    item_id = generate_random_id(12)
+                    clean_path = item.path.strip("/").replace("\\", "/")
+
+                    if item.is_dir:
+                        meta.items[clean_path] = V2ItemMetadata(
+                            path=clean_path,
+                            name=item.name,
+                            is_dir=True,
+                            item_id=item_id,
+                            modified=item.modified or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            category="FOLDER",
+                        )
+                        (ep_data_dir / item_id).mkdir(parents=True, exist_ok=True)
+                    else:
+                        local_extracted = ext_path / clean_path
+                        if local_extracted.exists():
+                            item_dir = ep_data_dir / item_id
+                            size, packed, chunks = self.v2_engine.chunk_and_encrypt_file(
+                                local_extracted, item_dir, self.password
+                            )
+                            cat = classify_file(item.name, is_dir=False).name
+                            meta.items[clean_path] = V2ItemMetadata(
+                                path=clean_path,
+                                name=item.name,
+                                is_dir=False,
+                                item_id=item_id,
+                                size=size,
+                                packed_size=packed,
+                                modified=item.modified or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                category=cat,
+                                chunks=chunks,
+                            )
+        except Exception as e:
+            log_warning(f"Error during legacy migration of '{ep_name}': {e}")
+
+        # Save metadata and recreate lightweight archive containing only metadata.json
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        # Clean up any leftover files inside ep_file except metadata.json
+        try:
+            current_7z_items = self.sevenzip.list_archive(ep_file, self.password)
+            to_delete = [i.path for i in current_7z_items if i.name != METADATA_FILENAME]
+            if to_delete:
+                self.sevenzip.delete_items(ep_file, to_delete, self.password)
+        except Exception:
+            pass
+
+        log_info(f"Successfully migrated '{ep_name}.7z' to V2 format ({len(meta.items)} items).")
+        return meta
+
     def create_entry_point(self, name: str) -> EntryPoint:
-        """Create a new top-level encrypted entry point (.7z file)."""
+        """Create a new V2 entry point archive."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -235,32 +347,43 @@ class Vault:
         if ep_file.exists():
             raise FileExistsError(f"Entry point '{clean_name}' already exists.")
 
-        self.sevenzip.create_empty_archive(ep_file, self.password)
+        meta = self.v2_engine.create_entry_point_archive(
+            ep_file, clean_name, self.password, self.arc_data_dir
+        )
+        self._v2_metadata[clean_name] = meta
+        self._cache[clean_name] = []
+
         ep = EntryPoint(
             name=clean_name,
             archive_file=ep_file,
             size_on_disk=ep_file.stat().st_size if ep_file.exists() else 0,
         )
         self.entry_points[clean_name] = ep
-        self._cache[clean_name] = []
-        log_info(f"Created new entry point '{clean_name}.7z'")
+        log_info(f"Created new V2 entry point '{clean_name}.7z'")
         return ep
 
     def delete_entry_point(self, name: str) -> bool:
-        """Delete an entire entry point (.7z file) from the vault."""
+        """Delete an entire entry point and its data directory in arc-data."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
         if name not in self.entry_points:
             return False
 
+        meta = self._v2_metadata.get(name)
+        if meta and meta.ep_dir_id:
+            ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+            if ep_data_dir.exists():
+                shutil.rmtree(ep_data_dir, ignore_errors=True)
+
         ep = self.entry_points[name]
         if ep.archive_file.exists():
             ep.archive_file.unlink()
 
         del self.entry_points[name]
+        self._v2_metadata.pop(name, None)
         self._cache.pop(name, None)
-        log_info(f"Deleted entry point '{name}.7z'")
+        log_info(f"Deleted entry point '{name}.7z' and its data store")
         return True
 
     def rename_entry_point(self, old_name: str, new_name: str) -> bool:
@@ -281,6 +404,12 @@ class Vault:
         old_file.rename(new_file)
         self.entry_points.pop(old_name, None)
         cached = self._cache.pop(old_name, [])
+        meta = self._v2_metadata.pop(old_name, None)
+
+        if meta:
+            meta.entry_point_name = clean_new
+            self.v2_engine.save_metadata(new_file, meta, self.password)
+            self._v2_metadata[clean_new] = meta
 
         ep = EntryPoint(
             name=clean_new,
@@ -293,7 +422,7 @@ class Vault:
         return True
 
     def get_archive_items(self, entry_point_name: str, force_reload: bool = False) -> List[ArchiveItem]:
-        """Get all items inside an entry point archive (cached)."""
+        """Project virtual files and folders from V2 metadata (metadata.json is never rendered)."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -303,17 +432,25 @@ class Vault:
         if not force_reload and entry_point_name in self._cache:
             return self._cache[entry_point_name]
 
-        archive_file = self.entry_points[entry_point_name].archive_file
-        items = self.sevenzip.list_archive(archive_file, self.password, entry_point_name=entry_point_name)
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+
+        items: List[ArchiveItem] = []
+        for item_meta in meta.items.values():
+            if item_meta.name == METADATA_FILENAME or item_meta.name == ".arcvault_init":
+                continue
+            items.append(item_meta.to_archive_item(entry_point_name))
+
         self._cache[entry_point_name] = items
-        self.entry_points[entry_point_name].item_count = len(items)
+        self.entry_points[entry_point_name].item_count = sum(1 for i in items if not i.is_dir)
         self.entry_points[entry_point_name].children = items
         return items
 
     def get_items_in_directory(self, entry_point_name: str, subfolder_path: str = "") -> List[ArchiveItem]:
-        """
-        List immediate children (files and subfolders) inside a specific subfolder.
-        """
+        """List immediate children (files and subfolders) inside a specific subfolder."""
         all_items = self.get_archive_items(entry_point_name)
         norm_sub = subfolder_path.strip("/").replace("\\", "/")
 
@@ -334,14 +471,13 @@ class Vault:
             parts = relative.split("/")
             first_segment = parts[0]
             if len(parts) == 1:
-                # Immediate child (can be a file or a folder)
+                # Immediate child
                 if first_segment not in results_dict or item.is_dir:
                     results_dict[first_segment] = item
             else:
                 # Intermediate directory
                 if first_segment not in results_dict:
                     full_dir_path = f"{norm_sub}/{first_segment}" if norm_sub else first_segment
-                    # Check if there is an explicit folder item in all_items
                     explicit_dir = next(
                         (i for i in all_items if i.path.strip("/").replace("\\", "/") == full_dir_path and i.is_dir),
                         None,
@@ -375,59 +511,276 @@ class Vault:
                         dirs.add("/".join(parts[:k]))
         return sorted(dirs)
 
-    def move_items(self, entry_point_name: str, item_paths: List[str], target_subfolder: str) -> bool:
-        """
-        Move items within an entry point into a target subfolder using 7-Zip internal rename (rn).
-        """
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        if entry_point_name not in self.entry_points:
-            raise ValueError(f"Entry point '{entry_point_name}' not found.")
-
-        ep = self.entry_points[entry_point_name]
-        clean_target = target_subfolder.strip("/").replace("\\", "/")
-
-        success = True
-        for old_path in item_paths:
-            clean_old = old_path.strip("/").replace("\\", "/")
-            item_name = clean_old.split("/")[-1]
-            new_path = f"{clean_target}/{item_name}".strip("/") if clean_target else item_name
-
-            if clean_old == new_path:
-                continue
-
-            ok = self.sevenzip.rename_item(ep.archive_file, clean_old, new_path, self.password)
-            if not ok:
-                success = False
-
-        self._cache.pop(entry_point_name, None)
-        self.refresh_entry_points()
-        dest_desc = f"/{clean_target}" if clean_target else "root"
-        log_info(f"Moved {len(item_paths)} items in '{entry_point_name}.7z' to {dest_desc}")
-        return success
-
     def add_files(
         self,
         entry_point_name: str,
         source_paths: List[Path],
         subfolder: str = "",
     ) -> bool:
-        """Add files into entry point archive under subfolder."""
+        """
+        Add local files or directories into the entry point without re-archiving existing files.
+        Chunks files > 1GB into 1GB store-mode AES-256 encrypted parts under arc-data.
+        """
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
         if entry_point_name not in self.entry_points:
             raise ValueError(f"Entry point '{entry_point_name}' not found.")
 
-        ep = self.entry_points[entry_point_name]
-        ok = self.sevenzip.add_files(ep.archive_file, source_paths, self.password, archive_subfolder=subfolder)
-        if ok:
-            self._cache.pop(entry_point_name, None)
-            self.refresh_entry_points()
-            sub_desc = f"/{subfolder}" if subfolder else "root"
-            log_info(f"Added {len(source_paths)} items to '{entry_point_name}' ({sub_desc})")
-        return ok
+        meta = self._v2_metadata.get(entry_point_name)
+        if not meta:
+            ep_file = self.entry_points[entry_point_name].archive_file
+            meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
+            self._v2_metadata[entry_point_name] = meta
+
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        ep_data_dir.mkdir(parents=True, exist_ok=True)
+        norm_sub = subfolder.strip("/").replace("\\", "/")
+
+        for src in source_paths:
+            if not src.exists():
+                continue
+
+            if src.is_dir():
+                self._add_directory_recursive(meta, ep_data_dir, src, parent_subfolder=norm_sub)
+            else:
+                self._add_single_file(meta, ep_data_dir, src, target_subfolder=norm_sub)
+
+        # Save lightweight metadata
+        ep_file = self.entry_points[entry_point_name].archive_file
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+
+        sub_desc = f"/{norm_sub}" if norm_sub else "root"
+        log_info(f"Added {len(source_paths)} items to '{entry_point_name}' ({sub_desc})")
+        return True
+
+    def _add_single_file(
+        self,
+        meta: V2EntryPointMetadata,
+        ep_data_dir: Path,
+        source_file: Path,
+        target_subfolder: str = "",
+    ) -> V2ItemMetadata:
+        """Encrypt and record a single file."""
+        item_id = generate_random_id(12)
+        item_dir = ep_data_dir / item_id
+        clean_name = source_file.name
+        rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
+
+        size, packed, chunks = self.v2_engine.chunk_and_encrypt_file(
+            source_file, item_dir, self.password
+        )
+
+        mod_time = datetime.fromtimestamp(source_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        cat = classify_file(clean_name, is_dir=False).name
+
+        item_meta = V2ItemMetadata(
+            path=rel_path,
+            name=clean_name,
+            is_dir=False,
+            item_id=item_id,
+            size=size,
+            packed_size=packed,
+            modified=mod_time,
+            category=cat,
+            chunks=chunks,
+        )
+        meta.items[rel_path] = item_meta
+        return item_meta
+
+    def _add_directory_recursive(
+        self,
+        meta: V2EntryPointMetadata,
+        ep_data_dir: Path,
+        source_dir: Path,
+        parent_subfolder: str = "",
+    ) -> None:
+        """Recursively add a local folder and all its contents."""
+        dir_name = source_dir.name
+        rel_dir_path = f"{parent_subfolder}/{dir_name}".strip("/") if parent_subfolder else dir_name
+
+        # Create folder item
+        folder_item_id = generate_random_id(12)
+        (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
+        mod_time = datetime.fromtimestamp(source_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        meta.items[rel_dir_path] = V2ItemMetadata(
+            path=rel_dir_path,
+            name=dir_name,
+            is_dir=True,
+            item_id=folder_item_id,
+            modified=mod_time,
+            category="FOLDER",
+        )
+
+        for child in source_dir.iterdir():
+            if child.is_dir():
+                self._add_directory_recursive(meta, ep_data_dir, child, parent_subfolder=rel_dir_path)
+            else:
+                self._add_single_file(meta, ep_data_dir, child, target_subfolder=rel_dir_path)
+
+    def create_subfolder(self, entry_point_name: str, parent_subfolder: str, new_folder_name: str) -> bool:
+        """Create a new folder inside an entry point (instant metadata operation)."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        meta = self._v2_metadata[entry_point_name]
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        clean_name = new_folder_name.strip()
+        target_path = f"{parent_subfolder}/{clean_name}".strip("/") if parent_subfolder else clean_name
+
+        folder_item_id = generate_random_id(12)
+        (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
+
+        meta.items[target_path] = V2ItemMetadata(
+            path=target_path,
+            name=clean_name,
+            is_dir=True,
+            item_id=folder_item_id,
+            modified=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            category="FOLDER",
+        )
+
+        ep_file = self.entry_points[entry_point_name].archive_file
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+        log_info(f"Created subfolder '{target_path}' inside '{entry_point_name}.7z'")
+        return True
+
+    def delete_item(self, entry_point_name: str, internal_path: str) -> bool:
+        """Delete an item or directory and remove its chunks from arc-data without re-archiving other files."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        meta = self._v2_metadata[entry_point_name]
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        clean_path = internal_path.strip("/").replace("\\", "/")
+
+        prefix = clean_path + "/"
+        to_delete_paths = [
+            p for p in meta.items.keys()
+            if p == clean_path or p.startswith(prefix)
+        ]
+
+        if not to_delete_paths:
+            return False
+
+        for p in to_delete_paths:
+            item = meta.items.pop(p, None)
+            if item and item.item_id:
+                item_dir = ep_data_dir / item.item_id
+                if item_dir.exists():
+                    shutil.rmtree(item_dir, ignore_errors=True)
+
+        ep_file = self.entry_points[entry_point_name].archive_file
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+        log_info(f"Deleted '{clean_path}' ({len(to_delete_paths)} items) from '{entry_point_name}.7z'")
+        return True
+
+    def rename_item(self, entry_point_name: str, old_path: str, new_path: str) -> bool:
+        """Rename an item inside metadata (instant, no chunk data re-encryption needed)."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        meta = self._v2_metadata[entry_point_name]
+        clean_old = old_path.strip("/").replace("\\", "/")
+        clean_new = new_path.strip("/").replace("\\", "/")
+
+        prefix = clean_old + "/"
+        affected_items = [
+            (p, it) for p, it in meta.items.items()
+            if p == clean_old or p.startswith(prefix)
+        ]
+
+        if not affected_items:
+            return False
+
+        for p, item in affected_items:
+            del meta.items[p]
+            if p == clean_old:
+                item.path = clean_new
+                item.name = clean_new.split("/")[-1]
+            else:
+                rel = p[len(clean_old) + 1:]
+                item.path = f"{clean_new}/{rel}"
+            meta.items[item.path] = item
+
+        ep_file = self.entry_points[entry_point_name].archive_file
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+        log_info(f"Renamed inside '{entry_point_name}.7z': '{clean_old}' -> '{clean_new}'")
+        return True
+
+    def move_items(self, entry_point_name: str, item_paths: List[str], target_subfolder: str) -> bool:
+        """Move items into a target subfolder (instant metadata update)."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        clean_target = target_subfolder.strip("/").replace("\\", "/")
+        for p in item_paths:
+            clean_p = p.strip("/").replace("\\", "/")
+            item_name = clean_p.split("/")[-1]
+            new_path = f"{clean_target}/{item_name}".strip("/") if clean_target else item_name
+            self.rename_item(entry_point_name, clean_p, new_path)
+
+        dest_desc = f"/{clean_target}" if clean_target else "root"
+        log_info(f"Moved {len(item_paths)} items in '{entry_point_name}.7z' to {dest_desc}")
+        return True
+
+    def extract_file_for_preview(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
+        """Extract a single file for preview. Files > 1GB cannot be previewed."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        meta = self._v2_metadata[entry_point_name]
+        clean_path = internal_path.strip("/").replace("\\", "/")
+        item = meta.items.get(clean_path)
+        if not item or item.is_dir:
+            return None
+
+        # Safeguard: files over 1GB cannot be previewed
+        if item.size > DEFAULT_CHUNK_SIZE:
+            log_warning(f"Preview skipped: '{item.name}' is over 1GB ({item.size} bytes).")
+            return None
+
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        item_dir = ep_data_dir / item.item_id
+        preview_dir = self.get_preview_temp_dir()
+        dest_file = preview_dir / item.name
+
+        ok = self.v2_engine.extract_file_to_destination(item, item_dir, self.password, dest_file)
+        return dest_file if (ok and dest_file.exists()) else None
+
+    def extract_file_for_editing(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
+        """Extract a single file into watched staging for external editor. Files > 1GB disabled."""
+        if not self.is_unlocked:
+            raise VaultUnlockError("Vault is locked.")
+
+        meta = self._v2_metadata[entry_point_name]
+        clean_path = internal_path.strip("/").replace("\\", "/")
+        item = meta.items.get(clean_path)
+        if not item or item.is_dir:
+            return None
+
+        # Safeguard: files over 1GB disabled for external editing
+        if item.size > DEFAULT_CHUNK_SIZE:
+            log_warning(f"External edit skipped: '{item.name}' is over 1GB.")
+            return None
+
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        item_dir = ep_data_dir / item.item_id
+        staging_dir = self.get_edit_staging_dir() / entry_point_name
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        dest_file = staging_dir / item.name
+
+        ok = self.v2_engine.extract_file_to_destination(item, item_dir, self.password, dest_file)
+        return dest_file if (ok and dest_file.exists()) else None
 
     def update_file_from_disk(
         self,
@@ -435,22 +788,38 @@ class Vault:
         internal_path: str,
         source_disk_file: Path,
     ) -> bool:
-        """Update an existing file inside the archive directly from a file on disk."""
+        """Update an existing file directly from disk without re-archiving other files."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        if entry_point_name not in self.entry_points:
-            raise ValueError(f"Entry point '{entry_point_name}' not found.")
+        meta = self._v2_metadata[entry_point_name]
+        clean_path = internal_path.strip("/").replace("\\", "/")
+        item = meta.items.get(clean_path)
+        if not item or item.is_dir or not source_disk_file.exists():
+            return False
 
-        ep = self.entry_points[entry_point_name]
-        ok = self.sevenzip.update_single_file(
-            ep.archive_file, source_disk_file, internal_path, self.password
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        item_dir = ep_data_dir / item.item_id
+
+        # Clean existing chunks
+        if item_dir.exists():
+            shutil.rmtree(item_dir, ignore_errors=True)
+
+        size, packed, chunks = self.v2_engine.chunk_and_encrypt_file(
+            source_disk_file, item_dir, self.password
         )
-        if ok:
-            self._cache.pop(entry_point_name, None)
-            self.refresh_entry_points()
-            log_info(f"Updated '{internal_path}' in '{entry_point_name}.7z'")
-        return ok
+
+        item.size = size
+        item.packed_size = packed
+        item.chunks = chunks
+        item.modified = datetime.fromtimestamp(source_disk_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        ep_file = self.entry_points[entry_point_name].archive_file
+        self.v2_engine.save_metadata(ep_file, meta, self.password)
+        self._cache.pop(entry_point_name, None)
+        self.refresh_entry_points()
+        log_info(f"Updated '{internal_path}' in '{entry_point_name}.7z'")
+        return True
 
     def update_file_content(
         self,
@@ -458,7 +827,7 @@ class Vault:
         internal_path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Update an existing file inside the archive with new string or byte content."""
+        """Update an existing file with new string or byte content."""
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             if isinstance(content, str):
                 tmp.write(content.encode("utf-8"))
@@ -472,79 +841,46 @@ class Vault:
             if tmp_path.exists():
                 tmp_path.unlink()
 
-    def create_subfolder(self, entry_point_name: str, parent_subfolder: str, new_folder_name: str) -> bool:
-        """Create a new folder inside an entry point."""
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        ep = self.entry_points[entry_point_name]
-        clean_name = new_folder_name.strip()
-        target_path = f"{parent_subfolder}/{clean_name}".strip("/") if parent_subfolder else clean_name
-        ok = self.sevenzip.create_subfolder_in_archive(ep.archive_file, target_path, self.password)
-        if ok:
-            self._cache.pop(entry_point_name, None)
-            self.refresh_entry_points()
-            log_info(f"Created subfolder '{target_path}' inside '{entry_point_name}.7z'")
-        return ok
-
-    def delete_item(self, entry_point_name: str, internal_path: str) -> bool:
-        """Delete an item (or directory) from an entry point archive."""
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        ep = self.entry_points[entry_point_name]
-        ok = self.sevenzip.delete_items(ep.archive_file, [internal_path], self.password)
-        if ok:
-            self._cache.pop(entry_point_name, None)
-            self.refresh_entry_points()
-            log_info(f"Deleted '{internal_path}' from '{entry_point_name}.7z'")
-        return ok
-
-    def rename_item(self, entry_point_name: str, old_path: str, new_path: str) -> bool:
-        """Rename an item inside an entry point archive."""
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        ep = self.entry_points[entry_point_name]
-        ok = self.sevenzip.rename_item(ep.archive_file, old_path, new_path, self.password)
-        if ok:
-            self._cache.pop(entry_point_name, None)
-            self.refresh_entry_points()
-            log_info(f"Renamed inside '{entry_point_name}.7z': '{old_path}' -> '{new_path}'")
-        return ok
-
-    def extract_file_for_preview(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
-        """Extract a single file into the temporary preview directory."""
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        ep = self.entry_points[entry_point_name]
-        preview_dir = self.get_preview_temp_dir()
-        return self.sevenzip.extract_file_for_preview(
-            ep.archive_file, internal_path, self.password, preview_dir
-        )
-
-    def extract_file_for_editing(self, entry_point_name: str, internal_path: str) -> Optional[Path]:
-        """Extract a single file into the persistent watched editing staging directory."""
-        if not self.is_unlocked:
-            raise VaultUnlockError("Vault is locked.")
-
-        ep = self.entry_points[entry_point_name]
-        staging_dir = self.get_edit_staging_dir() / entry_point_name
-        staging_dir.mkdir(parents=True, exist_ok=True)
-        return self.sevenzip.extract_file_for_preview(
-            ep.archive_file, internal_path, self.password, staging_dir
-        )
-
     def export_items(self, entry_point_name: str, internal_paths: List[str], dest_dir: Path) -> bool:
-        """Export selected items from entry point archive to destination directory."""
+        """Export selected items from V2 entry point, reassembling any shredded chunks."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        ep = self.entry_points[entry_point_name]
-        ok = self.sevenzip.extract_to_destination(
-            ep.archive_file, internal_paths, self.password, dest_dir
-        )
-        if ok:
-            log_info(f"Exported {len(internal_paths) if internal_paths else 'all'} items from '{entry_point_name}' to {dest_dir}")
-        return ok
+        meta = self._v2_metadata[entry_point_name]
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        targets = internal_paths if internal_paths else list(meta.items.keys())
+        all_ok = True
+
+        for p in targets:
+            clean_p = p.strip("/").replace("\\", "/")
+            item = meta.items.get(clean_p)
+            if not item:
+                continue
+
+            if item.is_dir:
+                # Export folder and all its contents
+                folder_dest = dest_dir / item.name
+                folder_dest.mkdir(parents=True, exist_ok=True)
+                prefix = clean_p + "/"
+                child_paths = [cp for cp in meta.items.keys() if cp.startswith(prefix)]
+                for cp in child_paths:
+                    c_item = meta.items[cp]
+                    if c_item.is_dir:
+                        rel = cp[len(clean_p) + 1:]
+                        (folder_dest / rel).mkdir(parents=True, exist_ok=True)
+                    else:
+                        rel = cp[len(clean_p) + 1:]
+                        c_file = folder_dest / rel
+                        c_item_dir = ep_data_dir / c_item.item_id
+                        if not self.v2_engine.extract_file_to_destination(c_item, c_item_dir, self.password, c_file):
+                            all_ok = False
+            else:
+                target_file = dest_dir / item.name
+                item_dir = ep_data_dir / item.item_id
+                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_file):
+                    all_ok = False
+
+        log_info(f"Exported {len(targets)} items from '{entry_point_name}' to {dest_dir}")
+        return all_ok

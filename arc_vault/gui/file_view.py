@@ -338,16 +338,27 @@ class FileExplorerView(QWidget):
 
         if items:
             first = items[0]
+            is_over_1gb = (first.size > 1024 * 1024 * 1024)
             if first.is_dir:
                 open_act = menu.addAction("Open Folder")
+                open_act.setIcon(IconProvider.get_icon("folder", dark_mode=self.dark_mode, size=16))
                 open_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
             else:
-                preview_act = menu.addAction("Preview")
-                preview_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
+                if is_over_1gb:
+                    preview_act = menu.addAction("Preview (Disabled: >1GB)")
+                    preview_act.setEnabled(False)
+                else:
+                    preview_act = menu.addAction("Preview")
+                    preview_act.triggered.connect(lambda: self.item_double_clicked.emit(first))
 
-                edit_act = menu.addAction("Edit in External App...")
-                edit_act.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
-                edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
+                if is_over_1gb:
+                    edit_act = menu.addAction("Edit in External App (Disabled: >1GB)")
+                    edit_act.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+                    edit_act.setEnabled(False)
+                else:
+                    edit_act = menu.addAction("Edit in External App...")
+                    edit_act.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=16))
+                    edit_act.triggered.connect(lambda: self.edit_external_requested.emit(first))
 
             menu.addSeparator()
             move_act = menu.addAction("Move to Folder...")
