@@ -560,5 +560,52 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertEqual(len(meta.ep_dir_id), 12)
         self.assertTrue((vault.arc_data_dir / meta.ep_dir_id).is_dir())
 
+
+    def test_cannot_create_vault_inside_existing_vault(self) -> None:
+        """Verify creating a vault inside or at an existing vault directory raises VaultExistsError."""
+        from arc_vault.core.vault import VaultExistsError
+
+        vault_dir = self.root_path / "first_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="First Vault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+        self.assertTrue(vault.is_unlocked)
+
+        # 1. Attempting to create at exact same path raises VaultExistsError
+        with self.assertRaises(VaultExistsError) as ctx1:
+            Vault.create_vault(
+                vault_dir,
+                name="Duplicate Vault",
+                password=self.password,
+                sevenzip=self.sz,
+            )
+        self.assertIn("already an existing vault", str(ctx1.exception))
+
+        # 2. Attempting to create in a nested subfolder inside the vault raises VaultExistsError
+        nested_dir = vault_dir / "subfolder" / "nested_vault"
+        with self.assertRaises(VaultExistsError) as ctx2:
+            Vault.create_vault(
+                nested_dir,
+                name="Nested Vault",
+                password=self.password,
+                sevenzip=self.sz,
+            )
+        self.assertIn("located inside an existing vault folder", str(ctx2.exception))
+
+        # 3. Attempting to create inside arc-data raises VaultExistsError
+        arc_data_sub = vault_dir / "arc-data" / "rogue_vault"
+        with self.assertRaises(VaultExistsError) as ctx3:
+            Vault.create_vault(
+                arc_data_sub,
+                name="Rogue Vault",
+                password=self.password,
+                sevenzip=self.sz,
+            )
+        self.assertIn("located inside an existing vault folder", str(ctx3.exception))
+
 if __name__ == "__main__":
     unittest.main()

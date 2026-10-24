@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.core.vault import Vault
+from arc_vault.core.vault import Vault, VaultExistsError
 from arc_vault.gui.icons import IconProvider
 from arc_vault.gui.workers import UnlockWorker
 
@@ -308,6 +308,16 @@ class CreateVaultDialog(QDialog):
             return
 
         loc_path = Path(loc_str)
+        enclosing = Vault.find_enclosing_vault(loc_path)
+        if enclosing:
+            if enclosing == loc_path.resolve():
+                err_msg = f"Cannot create vault: Directory '{loc_path.name}' is already an existing vault."
+            else:
+                err_msg = f"Cannot create vault: Selected directory is inside an existing vault folder ('{enclosing.name}')."
+            self._show_error(err_msg)
+            QMessageBox.warning(self, "Vault Conflict", err_msg)
+            return
+
         initial_eps: List[str] = []
         if self.chk_photos.isChecked():
             initial_eps.append("photos")
@@ -331,6 +341,9 @@ class CreateVaultDialog(QDialog):
             self.created_vault_path = loc_path
             self.created_vault_name = name
             self.accept()
+        except VaultExistsError as e:
+            self._show_error(str(e))
+            QMessageBox.warning(self, "Vault Conflict", str(e))
         except Exception as e:
             self._show_error(f"Failed to create vault: {e}")
 

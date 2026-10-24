@@ -31,6 +31,11 @@ class VaultUnlockError(Exception):
     pass
 
 
+class VaultExistsError(FileExistsError):
+    """Raised when trying to create a vault inside an existing vault folder."""
+    pass
+
+
 class Vault:
     """
     Manages an ArcVault root directory, its encrypted metadata entry points,
@@ -40,6 +45,37 @@ class Vault:
     MARKER_FILENAME = ".arcvault"
     CHECK_FILENAME = ".vault_check.7z"
     ARC_DATA_DIRNAME = "arc-data"
+
+    @classmethod
+    def is_vault_dir(cls, directory: Path) -> bool:
+        """Check if directory is an existing ArcVault root."""
+        if not directory.exists() or not directory.is_dir():
+            return False
+        return (
+            (directory / cls.MARKER_FILENAME).exists()
+            or (directory / cls.CHECK_FILENAME).exists()
+            or (directory / ".arcvault_vault").exists()
+        )
+
+    @classmethod
+    def find_enclosing_vault(cls, target_path: Path) -> Optional[Path]:
+        """
+        Check if target_path or any of its parent directories is an existing vault.
+        Returns the existing vault's root directory if found, or None.
+        """
+        try:
+            curr = target_path.resolve()
+        except Exception:
+            curr = target_path
+
+        while True:
+            if cls.is_vault_dir(curr):
+                return curr
+            parent = curr.parent
+            if parent == curr:
+                break
+            curr = parent
+        return None
 
     def __init__(
         self,
@@ -126,6 +162,18 @@ class Vault:
         obfuscate_names: bool = True,
     ) -> Vault:
         """Create a new vault directory with marker, verification check, and arc-data folder."""
+        # Safeguard: prevent creating a vault inside or at an existing vault folder
+        enclosing = cls.find_enclosing_vault(root_dir)
+        if enclosing:
+            if enclosing == root_dir.resolve():
+                raise VaultExistsError(
+                    f"Cannot create vault: Directory '{root_dir}' is already an existing vault."
+                )
+            else:
+                raise VaultExistsError(
+                    f"Cannot create vault: Target directory '{root_dir}' is located inside an existing vault folder ('{enclosing}')."
+                )
+
         sz = sevenzip or SevenZip()
         root_dir.mkdir(parents=True, exist_ok=True)
         arc_data = root_dir / cls.ARC_DATA_DIRNAME

@@ -641,5 +641,45 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertIn("PyInstaller", combined_text)
         dlg.close()
 
+
+    def test_create_vault_dialog_blocks_existing_vault_folder(self) -> None:
+        """Verify CreateVaultDialog rejects creating a vault in an existing vault or its subfolders."""
+        from PyQt6.QtWidgets import QMessageBox
+        from arc_vault.gui.vault_dialog import CreateVaultDialog
+
+        vault_dir = self.root_path / "gui_existing_vault"
+        Vault.create_vault(
+            vault_dir,
+            name="Existing Vault",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        dlg = CreateVaultDialog(dark_mode=True)
+        dlg.edit_name.setText("New Vault")
+        dlg.edit_password.setText("ValidPassword123")
+        dlg.edit_confirm.setText("ValidPassword123")
+
+        # 1. Target is the existing vault
+        dlg.edit_location.setText(str(vault_dir))
+        with patch.object(QMessageBox, "warning") as mock_warn:
+            dlg._on_create_clicked()
+            mock_warn.assert_called_once()
+            self.assertIn("already an existing vault", mock_warn.call_args[0][2])
+
+        self.assertIsNone(dlg.created_vault_path)
+        self.assertFalse(dlg.lbl_error.isHidden())
+        self.assertIn("already an existing vault", dlg.lbl_error.text())
+
+        # 2. Target is inside the existing vault
+        dlg.edit_location.setText(str(vault_dir / "subfolder" / "inner"))
+        with patch.object(QMessageBox, "warning") as mock_warn2:
+            dlg._on_create_clicked()
+            mock_warn2.assert_called_once()
+            self.assertIn("inside an existing vault folder", mock_warn2.call_args[0][2])
+
+        self.assertIsNone(dlg.created_vault_path)
+        dlg.close()
+
 if __name__ == "__main__":
     unittest.main()
