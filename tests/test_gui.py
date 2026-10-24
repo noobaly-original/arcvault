@@ -34,7 +34,7 @@ class TestArcVaultGUI(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_dir = tempfile.mkdtemp(prefix="arcvault_gui_test_")
         self.root_path = Path(self.tmp_dir)
-        self.config = AppConfig()
+        self.config = AppConfig(config_file=self.root_path / "config.json")
         self.config.known_vaults = []
         self.config.last_selected_vault_path = None
 

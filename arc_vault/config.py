@@ -14,7 +14,8 @@ class AppConfig:
     CONFIG_DIR = Path.home() / ".arcvault"
     CONFIG_FILE = CONFIG_DIR / "config.json"
 
-    def __init__(self) -> None:
+    def __init__(self, config_file: Optional[Path] = None) -> None:
+        self.config_file: Path = Path(config_file) if config_file else self.CONFIG_FILE
         self.known_vaults: List[Dict[str, Any]] = []
         self.theme: str = "dark"  # "dark" | "light" | "system"
         self.sevenzip_override_path: Optional[str] = None
@@ -24,19 +25,17 @@ class AppConfig:
 
     def load(self) -> None:
         """Load configuration from disk."""
-        if not self.CONFIG_FILE.exists():
+        if not self.config_file.exists():
             return
 
         try:
-            with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(self.config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.known_vaults = data.get("known_vaults", [])
             self.theme = data.get("theme", "dark")
             self.sevenzip_override_path = data.get("sevenzip_override_path")
             self.preview_max_text_size_kb = data.get("preview_max_text_size_kb", 4096)
             self.last_selected_vault_path = data.get("last_selected_vault_path")
-            # Filter out non-existent folders from known_vaults gracefully
-            # (or keep them but flag them)
         except Exception:
             # Fall back to defaults if corrupted
             pass
@@ -44,7 +43,7 @@ class AppConfig:
     def save(self) -> None:
         """Save configuration to disk."""
         try:
-            self.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "known_vaults": self.known_vaults,
                 "theme": self.theme,
@@ -52,7 +51,7 @@ class AppConfig:
                 "preview_max_text_size_kb": self.preview_max_text_size_kb,
                 "last_selected_vault_path": self.last_selected_vault_path,
             }
-            with open(self.CONFIG_FILE, "w", encoding="utf-8") as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"[ArcVault] Failed to save config: {e}")

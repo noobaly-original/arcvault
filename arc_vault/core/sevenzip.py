@@ -116,8 +116,9 @@ class SevenZip:
             cwd=str(cwd) if cwd else None,
             startupinfo=startupinfo,
         )
-        if check and res.returncode != 0:
-            raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {res.stderr or res.stdout}")
+        if check and res.returncode not in (0, 1):
+            err = (res.stderr or res.stdout).strip()
+            raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {err}")
         return res
 
     def test_archive(self, archive_path: Path, password: str) -> bool:
@@ -125,18 +126,15 @@ class SevenZip:
         if not archive_path.exists():
             return False
 
-        # Run test command: 't -p{pwd} {archive}'
         res = self._run(["t", f"-p{password}", "-y", str(archive_path.resolve())])
-        # Return code 0 indicates success
-        if res.returncode == 0 and "Everything is Ok" in res.stdout:
+        if res.returncode in (0, 1) and "Everything is Ok" in res.stdout:
             return True
 
-        # Check for explicit wrong password or error messages
         stdout_err = (res.stdout + "\n" + res.stderr).lower()
         if "wrong password" in stdout_err or "cannot open encrypted" in stdout_err or "headers error" in stdout_err:
             return False
 
-        return res.returncode == 0
+        return res.returncode in (0, 1)
 
     def list_archive(self, archive_path: Path, password: str, entry_point_name: str = "") -> List[ArchiveItem]:
         """List contents of archive using '-slt' switch."""
@@ -144,7 +142,7 @@ class SevenZip:
             return []
 
         res = self._run(["l", "-slt", f"-p{password}", "-y", str(archive_path.resolve())])
-        if res.returncode != 0:
+        if res.returncode not in (0, 1):
             stdout_err = (res.stdout + "\n" + res.stderr).lower()
             if "wrong password" in stdout_err or "headers error" in stdout_err:
                 raise SevenZipOperationError("Wrong password for archive.")
@@ -209,13 +207,11 @@ class SevenZip:
             marker = Path(tmp_dir) / ".arcvault_init"
             marker.write_text("ArcVault entry point archive initialized.\n", encoding="utf-8")
 
-            # -mhe=on encrypts archive headers (filenames and metadata)
-            # -mx=5 is normal compression level (fast & high ratio)
             res = self._run(
                 ["a", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), ".arcvault_init"],
                 cwd=Path(tmp_dir),
             )
-            return res.returncode == 0 and archive_path.exists()
+            return res.returncode in (0, 1) and archive_path.exists()
 
     def add_files(
         self,
@@ -225,37 +221,57 @@ class SevenZip:
         archive_subfolder: str = "",
     ) -> bool:
         """
-        Add local files or directories into the archive.
-        If archive_subfolder is provided, files will be added under that relative path inside the archive.
+        Add local files or directories into the archive with robust staging.
+        Supports both root and nested subfolders reliably without absolute path issues.
         """
         if not source_paths:
             return True
 
-        if archive_subfolder:
-            norm_sub = archive_subfolder.strip("/").replace("\\", "/")
-            with tempfile.TemporaryDirectory() as staging_dir:
-                target_stage = Path(staging_dir) / norm_sub
-                target_stage.mkdir(parents=True, exist_ok=True)
-                for src in source_paths:
-                    dest = target_stage / src.name
-                    if src.is_dir():
-                        shutil.copytree(src, dest, dirs_exist_ok=True)
-                    else:
-                        shutil.copy2(src, dest)
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        norm_sub = archive_subfolder.strip("/").replace("\\", "/")
 
-                # Add from staging_dir root
-                res = self._run(
-                    ["a", f"-p{password}", "-mhe=on", "-mx=5", "-r", "-y", str(archive_path.resolve()), norm_sub],
-                    cwd=Path(staging_dir),
-                )
-                return res.returncode == 0
-        else:
-            # Add directly at the root of the archive
-            str_sources = [str(s.resolve()) for s in source_paths]
-            res = self._run(
-                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-r", "-y", str(archive_path.resolve())] + str_sources
-            )
-            return res.returncode == 0
+        with tempfile.TemporaryDirectory(prefix="arcvault_add_") as staging_dir:
+            staging_root = Path(staging_dir)
+            target_stage = staging_root / norm_sub if norm_sub else staging_root
+            target_stage.mkdir(parents=True, exist_ok=True)
+
+            items_to_add: List[str] = []
+            for src in source_paths:
+                if not src.exists():
+                    continue
+                dest = target_stage / src.name
+                if src.is_dir():
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, dest)
+
+                if not norm_sub:
+                    items_to_add.append(src.name)
+
+            if norm_sub:
+                items_to_add = [norm_sub]
+
+            if not items_to_add:
+                return True
+
+            cmd = [
+                "a",
+                f"-p{password}",
+                "-mhe=on",
+                "-mx=5",
+                "-r",
+                "-y",
+                str(archive_path.resolve()),
+            ] + items_to_add
+
+            res = self._run(cmd, cwd=staging_root)
+
+            # In 7-Zip, exit code 0 is OK, 1 is Warning (e.g. attribute warnings on macOS, file added successfully)
+            if res.returncode not in (0, 1):
+                err = (res.stderr or res.stdout).strip()
+                raise SevenZipOperationError(err or f"7-Zip exited with code {res.returncode}")
+
+            return True
 
     def update_single_file(
         self,
@@ -264,10 +280,7 @@ class SevenZip:
         internal_path: str,
         password: str,
     ) -> bool:
-        """
-        Quickly and reliably update an existing file inside the 7z archive.
-        Uses 7-Zip 'u' (update) command with staging to guarantee accurate internal path.
-        """
+        """Quickly update an existing file inside the 7z archive via staging."""
         if not local_source_file.exists() or not archive_path.exists():
             return False
 
@@ -277,12 +290,15 @@ class SevenZip:
             stage_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(local_source_file, stage_path)
 
-            # Run 7z update command
             res = self._run(
                 ["u", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), norm_internal],
                 cwd=Path(stage_dir),
             )
-            return res.returncode == 0
+            if res.returncode not in (0, 1):
+                err = (res.stderr or res.stdout).strip()
+                raise SevenZipOperationError(err or f"7-Zip update error ({res.returncode})")
+
+            return True
 
     def create_subfolder_in_archive(
         self,
@@ -303,7 +319,7 @@ class SevenZip:
                 cwd=Path(tmp_dir),
             )
             self._run(["d", f"-p{password}", "-mhe=on", "-y", str(archive_path.resolve()), f"{norm_path}/.keep"])
-            return res.returncode == 0
+            return res.returncode in (0, 1)
 
     def extract_file_for_preview(
         self,
@@ -312,12 +328,12 @@ class SevenZip:
         password: str,
         dest_dir: Path,
     ) -> Optional[Path]:
-        """Extract a single file without directory recursion into dest_dir for preview."""
+        """Extract a single file into dest_dir for preview."""
         dest_dir.mkdir(parents=True, exist_ok=True)
         res = self._run(
             ["e", f"-p{password}", f"-o{str(dest_dir.resolve())}", "-y", str(archive_path.resolve()), internal_path]
         )
-        if res.returncode != 0:
+        if res.returncode not in (0, 1):
             return None
 
         filename = Path(internal_path).name
@@ -337,7 +353,7 @@ class SevenZip:
         if internal_paths:
             cmd.extend(internal_paths)
         res = self._run(cmd)
-        return res.returncode == 0
+        return res.returncode in (0, 1)
 
     def delete_items(
         self,
@@ -350,7 +366,7 @@ class SevenZip:
             return True
         cmd = ["d", f"-p{password}", "-mhe=on", "-y", str(archive_path.resolve())] + internal_paths
         res = self._run(cmd)
-        return res.returncode == 0
+        return res.returncode in (0, 1)
 
     def rename_item(
         self,
@@ -362,4 +378,4 @@ class SevenZip:
         """Rename a file or folder inside the archive."""
         cmd = ["rn", f"-p{password}", "-mhe=on", "-y", str(archive_path.resolve()), old_path, new_path]
         res = self._run(cmd)
-        return res.returncode == 0
+        return res.returncode in (0, 1)

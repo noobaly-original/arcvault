@@ -52,7 +52,6 @@ class FileTableWidget(QTableWidget):
             super().mouseMoveEvent(event)
             return
 
-        # Start Drag to Export
         selected_indexes = self.selectedIndexes()
         if not selected_indexes:
             super().mouseMoveEvent(event)
@@ -80,10 +79,11 @@ class FileTableWidget(QTableWidget):
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         if event.mimeData().hasUrls():
-            item = self.itemAt(event.position().toPoint())
-            if item:
-                # Highlight row under cursor
-                self.setCurrentItem(item)
+            row = self.rowAt(int(event.position().y()))
+            if 0 <= row < self.rowCount():
+                col0 = self.item(row, 0)
+                if col0:
+                    self.setCurrentItem(col0)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -102,12 +102,15 @@ class FileTableWidget(QTableWidget):
             event.ignore()
             return
 
-        # Identify target item under drop position
-        drop_pos = event.position().toPoint()
-        table_item = self.itemAt(drop_pos)
+        # Target item row resolution across any column
+        row = self.rowAt(int(event.position().y()))
         target_archive_item: Optional[ArchiveItem] = None
-        if table_item:
-            target_archive_item = table_item.data(Qt.ItemDataRole.UserRole)
+        if 0 <= row < self.rowCount():
+            col0 = self.item(row, 0)
+            if col0:
+                data = col0.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, ArchiveItem):
+                    target_archive_item = data
 
         self.files_dropped_on_item.emit(file_paths, target_archive_item)
         event.acceptProposedAction()
@@ -296,7 +299,6 @@ class FileExplorerView(QWidget):
         if not self.current_entry_point:
             # We are in Vault Root
             if target_item and (target_item.category == FileCategory.ENTRY_POINT or target_item.is_dir):
-                # Dropped directly on an entry point folder row!
                 ep_name = target_item.entry_point_name or target_item.name
                 self.files_dropped_on_entry_point.emit(files, ep_name)
             else:
@@ -305,11 +307,9 @@ class FileExplorerView(QWidget):
 
         # Inside an entry point archive
         if target_item and target_item.is_dir:
-            # Dropped onto a specific subdirectory row
             target_sub = target_item.path.strip("/")
             self.files_dropped_on_folder.emit(files, target_sub)
         else:
-            # Dropped onto table background or non-folder row -> target current subfolder
             self.files_dropped_on_folder.emit(files, self.current_subfolder)
 
     def _show_context_menu(self, pos) -> None:
