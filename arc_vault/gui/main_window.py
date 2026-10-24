@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from PyQt6.QtCore import QFileSystemWatcher, QPoint, Qt, QUrl
+from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, Qt, QUrl
 from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._apply_theme()
+        self._restore_window_state()
 
         if self.config.last_selected_vault_path:
             last_p = Path(self.config.last_selected_vault_path)
@@ -801,7 +802,49 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Rename Error", "Failed to rename item in archive.")
 
+    def _restore_window_state(self) -> None:
+        """Restore window size, position, maximized state, and splitter layout from config."""
+        try:
+            restored = False
+            if self.config.window_geometry:
+                geo_bytes = QByteArray.fromBase64(self.config.window_geometry.encode('ascii'))
+                restored = self.restoreGeometry(geo_bytes)
+
+            if not restored:
+                w = max(self.config.window_width, 850)
+                h = max(self.config.window_height, 500)
+                self.resize(w, h)
+                if self.config.window_x is not None and self.config.window_y is not None:
+                    self.move(self.config.window_x, self.config.window_y)
+
+            if self.config.window_maximized:
+                self.showMaximized()
+
+            if self.config.splitter_state and hasattr(self, 'main_splitter'):
+                split_bytes = QByteArray.fromBase64(self.config.splitter_state.encode('ascii'))
+                self.main_splitter.restoreState(split_bytes)
+        except Exception as e:
+            print(f'[ArcVault] Failed to restore window state: {e}')
+
+    def _save_window_state(self) -> None:
+        """Save window size, placement, maximized status, and splitter state to config."""
+        try:
+            self.config.window_geometry = bytes(self.saveGeometry().toBase64()).decode('ascii')
+            self.config.window_maximized = self.isMaximized()
+            if not self.isMaximized():
+                self.config.window_width = self.width()
+                self.config.window_height = self.height()
+                self.config.window_x = self.x()
+                self.config.window_y = self.y()
+            if hasattr(self, 'main_splitter'):
+                self.config.splitter_state = bytes(self.main_splitter.saveState().toBase64()).decode('ascii')
+            self.config.theme = 'dark' if self.dark_mode else 'light'
+            self.config.save()
+        except Exception as e:
+            print(f'[ArcVault] Failed to save window state: {e}')
+
     def closeEvent(self, event) -> None:
+        self._save_window_state()
         if self._watched_files:
             self.file_watcher.removePaths(list(self._watched_files.keys()))
             self._watched_files.clear()

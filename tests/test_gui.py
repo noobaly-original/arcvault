@@ -233,6 +233,36 @@ class TestArcVaultGUI(unittest.TestCase):
 
         win.close()
 
+    def test_window_state_and_theme_persistence(self) -> None:
+        """Verify theme, window geometry/placement, and sizes persist to config and restore."""
+        # 1. Test config saving/restoring
+        self.config.theme = "light"
+        self.config.window_width = 1200
+        self.config.window_height = 800
+        self.config.window_x = 100
+        self.config.window_y = 120
+        self.config.window_maximized = False
+        self.config.save()
+
+        config2 = AppConfig(config_file=self.config.config_file)
+        self.assertEqual(config2.theme, "light")
+        self.assertEqual(config2.window_width, 1200)
+        self.assertEqual(config2.window_height, 800)
+        self.assertEqual(config2.window_x, 100)
+        self.assertEqual(config2.window_y, 120)
+
+        # 2. Test MainWindow saves state on close and restores
+        win = MainWindow(config2, auto_unlock_last=False)
+        self.assertFalse(win.dark_mode)  # Theme should be light
+        win.resize(1250, 820)
+        win.move(150, 160)
+        win._save_window_state()
+
+        self.assertIsNotNone(config2.window_geometry)
+        self.assertEqual(config2.window_width, 1250)
+        self.assertEqual(config2.window_height, 820)
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

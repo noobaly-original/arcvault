@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 
 class AppConfig:
-    """Manages persistent application settings and known vault locations."""
+    """Manages persistent application settings, window state, and known vault locations."""
 
     CONFIG_DIR = Path.home() / ".arcvault"
     CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -21,6 +21,16 @@ class AppConfig:
         self.sevenzip_override_path: Optional[str] = None
         self.preview_max_text_size_kb: int = 4096
         self.last_selected_vault_path: Optional[str] = None
+
+        # Window state persistence
+        self.window_geometry: Optional[str] = None
+        self.window_maximized: bool = False
+        self.window_width: int = 1180
+        self.window_height: int = 740
+        self.window_x: Optional[int] = None
+        self.window_y: Optional[int] = None
+        self.splitter_state: Optional[str] = None
+
         self.load()
 
     def load(self) -> None:
@@ -36,6 +46,15 @@ class AppConfig:
             self.sevenzip_override_path = data.get("sevenzip_override_path")
             self.preview_max_text_size_kb = data.get("preview_max_text_size_kb", 4096)
             self.last_selected_vault_path = data.get("last_selected_vault_path")
+
+            # Window state
+            self.window_geometry = data.get("window_geometry")
+            self.window_maximized = bool(data.get("window_maximized", False))
+            self.window_width = int(data.get("window_width", 1180))
+            self.window_height = int(data.get("window_height", 740))
+            self.window_x = data.get("window_x")
+            self.window_y = data.get("window_y")
+            self.splitter_state = data.get("splitter_state")
         except Exception:
             # Fall back to defaults if corrupted
             pass
@@ -50,6 +69,13 @@ class AppConfig:
                 "sevenzip_override_path": self.sevenzip_override_path,
                 "preview_max_text_size_kb": self.preview_max_text_size_kb,
                 "last_selected_vault_path": self.last_selected_vault_path,
+                "window_geometry": self.window_geometry,
+                "window_maximized": self.window_maximized,
+                "window_width": self.window_width,
+                "window_height": self.window_height,
+                "window_x": self.window_x,
+                "window_y": self.window_y,
+                "splitter_state": self.splitter_state,
             }
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
