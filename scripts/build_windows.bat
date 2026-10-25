@@ -96,7 +96,7 @@ echo                   Build Successful!
 echo ==========================================================
 if exist "dist\ArcVault.exe" (
     for %%F in ("dist\ArcVault.exe") do set "SIZE=%%~zF bytes"
-    echo [✓] Standalone Portable Executable: dist\ArcVault.exe (!SIZE!)
+    echo [OK] Standalone Portable Executable: dist\ArcVault.exe (!SIZE!)
     echo.
     echo Portable Deployment Tip:
     echo   You can copy 'dist\ArcVault.exe' to any folder or USB drive.

@@ -87,7 +87,7 @@ echo "                   Build Successful!                      "
 echo "=========================================================="
 if [ -f "dist/ArcVault" ]; then
     SIZE=$(ls -lh "dist/ArcVault" | awk '{print $5}')
-    echo "[✓] Standalone Portable Executable: dist/ArcVault ($SIZE)"
+    echo "[OK] Standalone Portable Executable: dist/ArcVault ($SIZE)"
 fi
 echo ""
 echo "To run the standalone executable:"

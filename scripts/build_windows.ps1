@@ -83,7 +83,7 @@ if (Test-Path $OutputExe) {
     Write-Host "==========================================================" -ForegroundColor Green
     Write-Host "                   Build Successful!                      " -ForegroundColor Green
     Write-Host "==========================================================" -ForegroundColor Green
-    Write-Host "[✓] Standalone Portable Executable: $OutputExe ($SizeMB MB)" -ForegroundColor Green
+    Write-Host "[OK] Standalone Portable Executable: $OutputExe - $SizeMB MB" -ForegroundColor Green
     Write-Host ""
     Write-Host "Portable Deployment Tip:" -ForegroundColor Gray
     Write-Host "  You can copy '$OutputExe' to any folder or USB drive." -ForegroundColor Gray
