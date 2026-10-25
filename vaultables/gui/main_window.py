@@ -36,7 +36,7 @@ from vaultables.core.credentials import (
     retrieve_vault_password,
     store_vault_password,
 )
-from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.core.models import ArchiveItem, FileCategory, is_ignorable_system_file
 from vaultables.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError
 from vaultables.core.vault import Vault
 from vaultables.gui.breadcrumbs import BreadcrumbBar
@@ -978,10 +978,14 @@ class MainWindow(QMainWindow):
 
         files, _ = QFileDialog.getOpenFileNames(self, f"Add Files to '{self.active_entry_point}'", str(Path.home()))
         if files:
-            path_objs = [Path(f) for f in files]
-            self._start_add_files(path_objs, target_subfolder=self.current_subfolder)
+            path_objs = [Path(f) for f in files if not is_ignorable_system_file(Path(f))]
+            if path_objs:
+                self._start_add_files(path_objs, target_subfolder=self.current_subfolder)
 
     def _start_add_files(self, files: List[Path], target_subfolder: str = "") -> None:
+        files = [f for f in files if not is_ignorable_system_file(f)]
+        if not files:
+            return
         sub_info = f"/{target_subfolder}" if target_subfolder else ""
         self.status_bar.showMessage(
             f"Encrypting and adding {len(files)} items into {self.active_entry_point}.7z{sub_info}..."

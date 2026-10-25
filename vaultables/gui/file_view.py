@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.core.models import ArchiveItem, FileCategory, is_ignorable_system_file
 from vaultables.gui.icons import IconProvider
 from vaultables.gui.preview_panel import format_size
 
@@ -134,7 +134,10 @@ class FileTableWidget(QTableWidget):
         # 2. Handle External Files Drop from OS
         urls = event.mimeData().urls()
         if urls:
-            file_paths = [Path(u.toLocalFile()) for u in urls if u.isLocalFile()]
+            file_paths = [
+                Path(u.toLocalFile()) for u in urls
+                if u.isLocalFile() and not is_ignorable_system_file(Path(u.toLocalFile()))
+            ]
             if file_paths:
                 self.files_dropped_on_item.emit(file_paths, target_item)
                 event.acceptProposedAction()

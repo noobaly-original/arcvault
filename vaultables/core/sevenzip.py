@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from vaultables.core.models import ArchiveItem, classify_file
+from vaultables.core.models import ArchiveItem, classify_file, is_ignorable_system_file
 
 
 class SevenZipExecutableNotFoundError(Exception):
@@ -283,7 +283,7 @@ class SevenZip:
 
             items_to_add: List[str] = []
             for src in source_paths:
-                if not src.exists():
+                if not src.exists() or is_ignorable_system_file(src):
                     continue
                 dest = target_stage / src.name
                 if src.is_dir():

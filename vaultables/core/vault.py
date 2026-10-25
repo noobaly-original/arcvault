@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from vaultables.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file
+from vaultables.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file, is_ignorable_system_file
 from vaultables.core.sevenzip import SevenZip, SevenZipOperationError
 from vaultables.core.storage_v2 import (
     DEFAULT_CHUNK_SIZE,
@@ -433,7 +433,7 @@ class Vault:
         self.ensure_import_readme()
         archives = [
             f for f in sorted(self.import_dir.rglob("*.7z"))
-            if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
+            if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak") and not is_ignorable_system_file(f)
         ]
         if not archives:
             return 0
@@ -484,7 +484,7 @@ class Vault:
 
                     extracted_items = [
                         p for p in random_stage.iterdir()
-                        if p.name not in (".vaultables_init", METADATA_FILENAME)
+                        if p.name not in (".vaultables_init", METADATA_FILENAME) and not is_ignorable_system_file(p)
                     ]
 
                     # 4. Incorporate into 'imports' entry point
@@ -528,7 +528,7 @@ class Vault:
         # Auto-process pending off-site imports if any exist
         if not self._is_importing and self.import_dir.exists():
             has_7z = any(
-                f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
+                f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak") and not is_ignorable_system_file(f)
                 for f in self.import_dir.rglob("*.7z")
             )
             if has_7z:
@@ -551,12 +551,14 @@ class Vault:
             ep_data_dir = self.arc_data_dir / meta.ep_dir_id
             if ep_data_dir.exists():
                 for p in ep_data_dir.rglob("*.7z"):
+                    if is_ignorable_system_file(p) or p.name.startswith("."):
+                        continue
                     try:
                         size_on_disk += p.stat().st_size
                     except Exception:
                         pass
 
-            item_count = sum(1 for it in meta.items.values() if not it.is_dir)
+            item_count = sum(1 for it in meta.items.values() if not it.is_dir and not is_ignorable_system_file(it.name))
             self.entry_points[ep_name] = EntryPoint(
                 name=ep_name,
                 archive_file=file,
@@ -575,6 +577,20 @@ class Vault:
         """Load V2 metadata. If legacy V1 monolithic archive, migrate seamlessly."""
         meta = self.v2_engine.load_metadata(ep_file, self.password)
         if meta is not None:
+            # Auto-purge any existing ._* AppleDouble files or OS junk from loaded metadata
+            stale_keys = [
+                k for k, it in meta.items.items()
+                if is_ignorable_system_file(it.name)
+            ]
+            if stale_keys:
+                ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+                for k in stale_keys:
+                    item_meta = meta.items.pop(k, None)
+                    if item_meta and item_meta.item_id:
+                        item_folder = ep_data_dir / item_meta.item_id
+                        if item_folder.exists():
+                            shutil.rmtree(item_folder, ignore_errors=True)
+                self.v2_engine.save_metadata(ep_file, meta, self.password)
             return meta
 
         # Legacy V1 archive detected! Auto-migrate into V2
@@ -600,7 +616,7 @@ class Vault:
                 self.sevenzip.extract_to_destination(ep_file, [], self.password, ext_path)
 
                 for item in legacy_items:
-                    if item.name in (METADATA_FILENAME, ".vaultables_init"):
+                    if item.name in (METADATA_FILENAME, ".vaultables_init") or is_ignorable_system_file(item.name):
                         continue
                     clean_path = item.path.strip("/").replace("\\", "/")
                     if self.obfuscate_names:
@@ -765,7 +781,7 @@ class Vault:
 
         items: List[ArchiveItem] = []
         for item_meta in meta.items.values():
-            if item_meta.name == METADATA_FILENAME or item_meta.name == ".vaultables_init":
+            if item_meta.name in (METADATA_FILENAME, ".vaultables_init") or is_ignorable_system_file(item_meta.name):
                 continue
             items.append(item_meta.to_archive_item(entry_point_name))
 
@@ -946,7 +962,7 @@ class Vault:
         norm_sub = subfolder.strip("/").replace("\\", "/")
 
         for src in source_paths:
-            if not src.exists():
+            if not src.exists() or is_ignorable_system_file(src):
                 continue
 
             if src.is_dir():
@@ -970,9 +986,11 @@ class Vault:
         ep_data_dir: Path,
         source_file: Path,
         target_subfolder: str = "",
-    ) -> V2ItemMetadata:
+    ) -> Optional[V2ItemMetadata]:
         """Encrypt and record a single file."""
         clean_name = source_file.name
+        if is_ignorable_system_file(clean_name):
+            return None
         rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
         is_obf = meta.is_obfuscated(self.obfuscate_names)
 
@@ -1043,6 +1061,8 @@ class Vault:
         )
 
         for child in source_dir.iterdir():
+            if is_ignorable_system_file(child):
+                continue
             if child.is_dir():
                 self._add_directory_recursive(meta, ep_data_dir, child, parent_subfolder=rel_dir_path)
             else:
@@ -1333,6 +1353,8 @@ class Vault:
 
         all_ok = True
         for p, item in meta.items.items():
+            if is_ignorable_system_file(item.name):
+                continue
             clean_p = p.strip("/").replace("\\", "/")
             target_path = dest_dir / clean_p
             if item.is_dir:

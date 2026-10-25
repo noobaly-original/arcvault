@@ -948,6 +948,43 @@ class TestVaultablesGUI(unittest.TestCase):
 
         win.close()
 
+
+    def test_gui_drop_filters_appledouble_and_ds_store(self) -> None:
+        """Verify FileTableWidget.dropEvent filters out ._* and .DS_Store files from dropped URLs."""
+        from PyQt6.QtCore import QMimeData, QUrl
+        from PyQt6.QtGui import QDropEvent
+        from PyQt6.QtCore import QPointF, QPoint
+
+        view = FileExplorerView()
+        captured_paths = []
+
+        def capture(files, target):
+            captured_paths.extend(files)
+
+        view.table.files_dropped_on_item.connect(capture)
+
+        mime = QMimeData()
+        mime.setUrls([
+            QUrl.fromLocalFile("/Volumes/GoogleDrive/example.pdf"),
+            QUrl.fromLocalFile("/Volumes/GoogleDrive/._example.pdf"),
+            QUrl.fromLocalFile("/Volumes/GoogleDrive/.DS_Store"),
+            QUrl.fromLocalFile("/Volumes/GoogleDrive/notes.txt"),
+        ])
+
+        drop_ev = QDropEvent(
+            QPointF(10, 10),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        view.table.dropEvent(drop_ev)
+        captured_names = [p.name for p in captured_paths]
+        self.assertEqual(captured_names, ["example.pdf", "notes.txt"])
+        self.assertNotIn("._example.pdf", captured_names)
+        self.assertNotIn(".DS_Store", captured_names)
+
 if __name__ == "__main__":
 
     unittest.main()

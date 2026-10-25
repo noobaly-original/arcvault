@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 
 class FileCategory(str, Enum):
@@ -125,3 +125,25 @@ def classify_file(name: str, is_dir: bool = False) -> FileCategory:
         return FileCategory.KEY_CERT
 
     return FileCategory.GENERIC
+
+
+SYSTEM_IGNORABLE_FILES = {
+    ".ds_store",
+    ".localized",
+    "thumbs.db",
+    "desktop.ini",
+    "ehthumbs.db",
+}
+
+
+def is_ignorable_system_file(name_or_path: Union[str, Path]) -> bool:
+    """
+    Return True if the file or folder is a system metadata/junk artifact:
+    - macOS AppleDouble resource fork sidecars (e.g. ._example.pdf, ._image.png)
+    - macOS desktop metadata (.DS_Store, .localized)
+    - Windows thumbnail & folder metadata (Thumbs.db, desktop.ini)
+    """
+    name = name_or_path.name if isinstance(name_or_path, Path) else Path(name_or_path).name
+    if name.startswith("._"):
+        return True
+    return name.lower() in SYSTEM_IGNORABLE_FILES

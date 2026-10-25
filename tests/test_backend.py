@@ -942,6 +942,96 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertNotIn("docs", vault._v2_metadata)
         self.assertNotIn("docs", vault._cache)
 
+
+    def test_ignore_appledouble_and_system_metadata_files(self) -> None:
+        """Verify macOS AppleDouble (._*) files and system junk (.DS_Store) are ignored and auto-purged."""
+        from vaultables.core.models import is_ignorable_system_file
+        from vaultables.core.storage_v2 import V2ItemMetadata
+
+        # 1. Direct classifier tests
+        self.assertTrue(is_ignorable_system_file("._example.pdf"))
+        self.assertTrue(is_ignorable_system_file(Path("/Volumes/GoogleDrive/._example.pdf")))
+        self.assertTrue(is_ignorable_system_file(".DS_Store"))
+        self.assertTrue(is_ignorable_system_file("Thumbs.db"))
+        self.assertTrue(is_ignorable_system_file("desktop.ini"))
+        self.assertFalse(is_ignorable_system_file("example.pdf"))
+        self.assertFalse(is_ignorable_system_file("notes.txt"))
+        self.assertFalse(is_ignorable_system_file(".gitignore"))
+
+        # 2. Vaulting files with ._* sidecar companions (e.g. from Google Drive or FAT/exFAT drives)
+        vault_dir = self.root_path / "appledouble_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="AppleDouble Vault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        stage_dir = self.root_path / "stage_gdrive"
+        stage_dir.mkdir()
+
+        # Actual file (10 KB)
+        main_pdf = stage_dir / "example.pdf"
+        main_pdf.write_bytes(b"%PDF-1.4 real pdf document data" * 300)
+
+        # AppleDouble companion file (4 KB) produced by macOS on Google Drive
+        sidecar_pdf = stage_dir / "._example.pdf"
+        sidecar_pdf.write_bytes(b"\x00\x05\x16\x07AppleDouble metadata" * 150)
+
+        # macOS .DS_Store
+        ds_store = stage_dir / ".DS_Store"
+        ds_store.write_bytes(b"\x00\x00\x00\x01Bud1" * 50)
+
+        # User vaults all items (as happens during multi-selection or folder drop)
+        vault.add_files("docs", [main_pdf, sidecar_pdf, ds_store])
+
+        # Verify only the genuine file was added
+        items = vault.get_items_in_directory("docs")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].name, "example.pdf")
+        self.assertNotIn("._example.pdf", vault._v2_metadata["docs"].items)
+        self.assertNotIn(".DS_Store", vault._v2_metadata["docs"].items)
+
+        # 3. Adding a folder containing nested ._* files
+        travel_dir = stage_dir / "travel"
+        travel_dir.mkdir()
+        photo = travel_dir / "beach.jpg"
+        photo.write_bytes(b"jpg image data")
+        photo_sidecar = travel_dir / "._beach.jpg"
+        photo_sidecar.write_bytes(b"AppleDouble photo metadata")
+        travel_ds_store = travel_dir / ".DS_Store"
+        travel_ds_store.write_bytes(b"nested ds store")
+
+        vault.add_files("docs", [travel_dir])
+
+        travel_items = vault.get_items_in_directory("docs", "travel")
+        self.assertEqual(len(travel_items), 1)
+        self.assertEqual(travel_items[0].name, "beach.jpg")
+
+        # 4. Auto-purge existing ._* entries in legacy / corrupted metadata
+        meta = vault._v2_metadata["docs"]
+        ep_data_dir = vault.arc_data_dir / meta.ep_dir_id
+        dummy_stale_dir = ep_data_dir / "stale_item"
+        dummy_stale_dir.mkdir(parents=True, exist_ok=True)
+        (dummy_stale_dir / "chunk_000.7z").write_bytes(b"fake chunk")
+
+        meta.items["._legacy.pdf"] = V2ItemMetadata(
+            path="._legacy.pdf",
+            name="._legacy.pdf",
+            is_dir=False,
+            item_id="stale_item",
+            size=4096,
+        )
+        vault.v2_engine.save_metadata(vault.entry_points["docs"].archive_file, meta, vault.password)
+
+        # Refresh / re-load entry points triggers auto-purge
+        vault.refresh_entry_points()
+        reloaded_items = vault.get_items_in_directory("docs")
+        self.assertNotIn("._legacy.pdf", [i.name for i in reloaded_items])
+        self.assertNotIn("._legacy.pdf", vault._v2_metadata["docs"].items)
+        self.assertFalse(dummy_stale_dir.exists())
+
 if __name__ == "__main__":
 
     unittest.main()
