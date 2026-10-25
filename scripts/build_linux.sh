@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ArcVault - Linux Build Script
+# Vaultables - Linux Build Script
 # Builds a portable "onefile" standalone ELF executable for Linux.
 # Automatically sets up .venv and installs requirements.txt.
 # ==============================================================================
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=========================================================="
-echo "          ArcVault - Linux Build & Packaging              "
+echo "          Vaultables - Linux Build & Packaging              "
 echo "=========================================================="
 
 # 1. Locate Host Python 3
@@ -55,15 +55,15 @@ fi
 
 # 4. Clean prior build files
 echo "[*] Cleaning build/ directory..."
-rm -rf build/arcvault build/arcvault_onefile
+rm -rf build/vaultables build/vaultables_onefile
 
 # 5. Build Portable Onefile Executable
 echo "[*] Compiling portable standalone Linux executable (onefile)..."
-$PYTHON_BIN -m PyInstaller arcvault_onefile.spec --noconfirm --clean
+$PYTHON_BIN -m PyInstaller vaultables_onefile.spec --noconfirm --clean
 
 # 6. Ensure executable permissions
-if [ -f "dist/ArcVault" ]; then
-    chmod +x "dist/ArcVault"
+if [ -f "dist/Vaultables" ]; then
+    chmod +x "dist/Vaultables"
 fi
 
 # 7. Verify 7-Zip CLI availability
@@ -73,11 +73,11 @@ if command -v 7zz &>/dev/null || command -v 7z &>/dev/null || command -v 7za &>/
     echo "[+] 7-Zip engine detected on host system."
 else
     echo "[!] Notice: 7-Zip binary was not found in PATH."
-    echo "    To run ArcVault on this machine, install 7-Zip:"
+    echo "    To run Vaultables on this machine, install 7-Zip:"
     echo "      Ubuntu/Debian: sudo apt install p7zip-full"
     echo "      Fedora/RHEL:   sudo dnf install p7zip p7zip-plugins"
     echo "      Arch Linux:    sudo pacman -S p7zip"
-    echo "    Alternatively, place a standalone '7zz' or '7z' binary next to ArcVault."
+    echo "    Alternatively, place a standalone '7zz' or '7z' binary next to Vaultables."
 fi
 
 # 8. Report outputs
@@ -85,11 +85,11 @@ echo ""
 echo "=========================================================="
 echo "                   Build Successful!                      "
 echo "=========================================================="
-if [ -f "dist/ArcVault" ]; then
-    SIZE=$(ls -lh "dist/ArcVault" | awk '{print $5}')
-    echo "[OK] Standalone Portable Executable: dist/ArcVault ($SIZE)"
+if [ -f "dist/Vaultables" ]; then
+    SIZE=$(ls -lh "dist/Vaultables" | awk '{print $5}')
+    echo "[OK] Standalone Portable Executable: dist/Vaultables ($SIZE)"
 fi
 echo ""
 echo "To run the standalone executable:"
-echo "  ./dist/ArcVault"
+echo "  ./dist/Vaultables"
 echo "=========================================================="

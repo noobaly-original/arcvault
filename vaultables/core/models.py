@@ -1,4 +1,4 @@
-"""Data models for ArcVault archives and vault structures."""
+"""Data models for Vaultables archives and vault structures."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class EntryPoint:
 
 @dataclass
 class VaultMetadata:
-    """Metadata read from the vault marker file (.arcvault)."""
+    """Metadata read from the vault marker file (.vaultables)."""
 
     name: str
     vault_id: str

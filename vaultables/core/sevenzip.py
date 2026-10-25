@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from arc_vault.core.models import ArchiveItem, classify_file
+from vaultables.core.models import ArchiveItem, classify_file
 
 
 class SevenZipExecutableNotFoundError(Exception):
@@ -38,7 +38,7 @@ class SevenZip:
         """Detect the 7-Zip executable path across macOS, Linux, and Windows."""
         # 1. Environment variable
         env_override = (
-            os.environ.get("ARCVAULT_7Z_PATH")
+            os.environ.get("VAULTABLES_7Z_PATH") or os.environ.get("ARCVAULT_7Z_PATH")
             or os.environ.get("ARCVUULT_7Z_PATH")
             or os.environ.get("SEVENZIP_PATH")
         )
@@ -140,7 +140,7 @@ class SevenZip:
         )
 
         try:
-            from arc_vault.logger import log_7zip
+            from vaultables.logger import log_7zip
             log_7zip(cmd, res.returncode, res.stdout, res.stderr)
         except Exception:
             pass
@@ -198,7 +198,7 @@ class SevenZip:
                 continue
 
             # Skip hidden marker file if present
-            if path_val.endswith(".arcvault_init"):
+            if path_val.endswith(".vaultables_init"):
                 continue
 
             raw_entries.append(entry_dict)
@@ -250,11 +250,11 @@ class SevenZip:
         """Create a new 7z archive encrypted with AES-256 and header encryption."""
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp_dir:
-            marker = Path(tmp_dir) / ".arcvault_init"
-            marker.write_text("ArcVault entry point archive initialized.\n", encoding="utf-8")
+            marker = Path(tmp_dir) / ".vaultables_init"
+            marker.write_text("Vaultables entry point archive initialized.\n", encoding="utf-8")
 
             res = self._run(
-                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), ".arcvault_init"],
+                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), ".vaultables_init"],
                 cwd=Path(tmp_dir),
             )
             return res.returncode in (0, 1) and archive_path.exists()
@@ -276,7 +276,7 @@ class SevenZip:
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         norm_sub = archive_subfolder.strip("/").replace("\\", "/")
 
-        with tempfile.TemporaryDirectory(prefix="arcvault_add_") as staging_dir:
+        with tempfile.TemporaryDirectory(prefix="vaultables_add_") as staging_dir:
             staging_root = Path(staging_dir)
             target_stage = staging_root / norm_sub if norm_sub else staging_root
             target_stage.mkdir(parents=True, exist_ok=True)
@@ -331,7 +331,7 @@ class SevenZip:
             return False
 
         norm_internal = internal_path.strip("/").replace("\\", "/")
-        with tempfile.TemporaryDirectory(prefix="arcvault_edit_") as stage_dir:
+        with tempfile.TemporaryDirectory(prefix="vaultables_edit_") as stage_dir:
             stage_path = Path(stage_dir) / norm_internal
             stage_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(local_source_file, stage_path)

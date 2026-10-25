@@ -19,9 +19,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.core.models import ArchiveItem, FileCategory
-from arc_vault.gui.icons import IconProvider
-from arc_vault.gui.preview_panel import format_size
+from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.gui.icons import IconProvider
+from vaultables.gui.preview_panel import format_size
 
 
 class FileTableWidget(QTableWidget):
@@ -81,14 +81,14 @@ class FileTableWidget(QTableWidget):
             "source_entry_point": items[0].entry_point_name,
             "items": [it.path for it in items],
         }
-        mime.setData("application/x-arcvault-internal", json.dumps(internal_data).encode("utf-8"))
+        mime.setData("application/x-vaultables-internal", json.dumps(internal_data).encode("utf-8"))
 
         drag.setMimeData(mime)
         self.drag_export_requested.emit(items)
         drag.exec(Qt.DropAction.CopyAction)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-arcvault-internal"):
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-vaultables-internal"):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -101,7 +101,7 @@ class FileTableWidget(QTableWidget):
         else:
             self.clearSelection()
 
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-arcvault-internal"):
+        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-vaultables-internal"):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -117,10 +117,10 @@ class FileTableWidget(QTableWidget):
                 target_item = item_widget.data(Qt.ItemDataRole.UserRole)
 
         # 1. Handle Internal Drag & Move
-        if event.mimeData().hasFormat("application/x-arcvault-internal"):
+        if event.mimeData().hasFormat("application/x-vaultables-internal"):
             try:
                 import json
-                raw_bytes = bytes(event.mimeData().data("application/x-arcvault-internal"))
+                raw_bytes = bytes(event.mimeData().data("application/x-vaultables-internal"))
                 data = json.loads(raw_bytes.decode("utf-8"))
                 source_ep = data.get("source_entry_point", "")
                 item_paths = data.get("items", [])
@@ -129,7 +129,7 @@ class FileTableWidget(QTableWidget):
                     event.acceptProposedAction()
                     return
             except Exception as e:
-                print(f"[ArcVault] Failed to process internal drop: {e}")
+                print(f"[Vaultables] Failed to process internal drop: {e}")
 
         # 2. Handle External Files Drop from OS
         urls = event.mimeData().urls()

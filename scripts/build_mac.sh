@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ArcVault - macOS Build Script
+# Vaultables - macOS Build Script
 # Builds a portable "onefile" standalone executable and macOS .app bundle.
 # Automatically sets up .venv and installs requirements.txt.
 # ==============================================================================
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=========================================================="
-echo "          ArcVault - macOS Build & Packaging              "
+echo "          Vaultables - macOS Build & Packaging              "
 echo "=========================================================="
 
 # 1. Locate Host Python 3
@@ -54,16 +54,16 @@ else
 fi
 
 # 4. Ensure icon assets (icns & ico) are up to date from icon.png
-ICON_PNG="arc_vault/resources/icon.png"
-ICON_ICNS="arc_vault/resources/ArcVault.icns"
-ICON_ICO="arc_vault/resources/ArcVault.ico"
+ICON_PNG="vaultables/resources/icon.png"
+ICON_ICNS="vaultables/resources/Vaultables.icns"
+ICON_ICO="vaultables/resources/Vaultables.ico"
 
 if [ -f "$ICON_PNG" ]; then
     # Generate macOS .icns if needed
     if command -v iconutil &>/dev/null && command -v sips &>/dev/null; then
         if [ ! -f "$ICON_ICNS" ] || [ "$ICON_PNG" -nt "$ICON_ICNS" ]; then
-            echo "[*] Regenerating Apple Iconset (ArcVault.icns) from icon.png..."
-            TMP_ICONSET="/tmp/ArcVault_build.iconset"
+            echo "[*] Regenerating Apple Iconset (Vaultables.icns) from icon.png..."
+            TMP_ICONSET="/tmp/Vaultables_build.iconset"
             rm -rf "$TMP_ICONSET"
             mkdir -p "$TMP_ICONSET"
             sips -z 16 16     "$ICON_PNG" --out "$TMP_ICONSET/icon_16x16.png" >/dev/null 2>&1
@@ -90,24 +90,24 @@ fi
 
 # 5. Clean prior build files
 echo "[*] Cleaning build/ directory..."
-rm -rf build/arcvault build/arcvault_onefile
+rm -rf build/vaultables build/vaultables_onefile
 
 # 6. Build macOS Application Bundle first
-echo "[*] Compiling native macOS Application Bundle (ArcVault.app)..."
-$PYTHON_BIN -m PyInstaller arcvault.spec --noconfirm --clean
+echo "[*] Compiling native macOS Application Bundle (Vaultables.app)..."
+$PYTHON_BIN -m PyInstaller vaultables.spec --noconfirm --clean
 
 # 7. Build Portable Onefile Executable
 echo "[*] Compiling portable standalone executable (onefile)..."
-$PYTHON_BIN -m PyInstaller arcvault_onefile.spec --noconfirm
+$PYTHON_BIN -m PyInstaller vaultables_onefile.spec --noconfirm
 
 # 8. Ad-hoc code sign for macOS Gatekeeper
 if command -v codesign &>/dev/null; then
     echo "[*] Applying ad-hoc signature to executables..."
-    if [ -f "dist/ArcVault" ]; then
-        codesign --force --sign - "dist/ArcVault" >/dev/null 2>&1 || true
+    if [ -f "dist/Vaultables" ]; then
+        codesign --force --sign - "dist/Vaultables" >/dev/null 2>&1 || true
     fi
-    if [ -d "dist/ArcVault.app" ]; then
-        codesign --force --deep --sign - "dist/ArcVault.app" >/dev/null 2>&1 || true
+    if [ -d "dist/Vaultables.app" ]; then
+        codesign --force --deep --sign - "dist/Vaultables.app" >/dev/null 2>&1 || true
     fi
 fi
 
@@ -116,17 +116,17 @@ echo ""
 echo "=========================================================="
 echo "                   Build Successful!                      "
 echo "=========================================================="
-if [ -f "dist/ArcVault" ]; then
-    SIZE=$(ls -lh "dist/ArcVault" | awk '{print $5}')
-    echo "[OK] Standalone Portable Executable: dist/ArcVault ($SIZE)"
+if [ -f "dist/Vaultables" ]; then
+    SIZE=$(ls -lh "dist/Vaultables" | awk '{print $5}')
+    echo "[OK] Standalone Portable Executable: dist/Vaultables ($SIZE)"
 fi
-if [ -d "dist/ArcVault.app" ]; then
-    echo "[OK] macOS Application Bundle:      dist/ArcVault.app"
+if [ -d "dist/Vaultables.app" ]; then
+    echo "[OK] macOS Application Bundle:      dist/Vaultables.app"
 fi
 echo ""
 echo "To run the standalone portable binary:"
-echo "  ./dist/ArcVault"
+echo "  ./dist/Vaultables"
 echo ""
 echo "To open the macOS app bundle:"
-echo "  open dist/ArcVault.app"
+echo "  open dist/Vaultables.app"
 echo "=========================================================="

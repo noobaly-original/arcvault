@@ -1,4 +1,4 @@
-"""Configuration management for ArcVault."""
+"""Configuration management for Vaultables."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 class AppConfig:
     """Manages persistent application settings, window state, and known vault locations."""
 
-    CONFIG_DIR = Path.home() / ".arcvault"
+    CONFIG_DIR = Path.home() / ".vaultables"
+    LEGACY_CONFIG_DIR = Path.home() / ".vaultables"
     CONFIG_FILE = CONFIG_DIR / "config.json"
 
     def __init__(self, config_file: Optional[Path] = None) -> None:
@@ -86,7 +87,7 @@ class AppConfig:
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         except Exception as e:
-            print(f"[ArcVault] Failed to save config: {e}")
+            print(f"[Vaultables] Failed to save config: {e}")
 
     def add_or_update_vault(self, vault_path: str, name: str) -> None:
         """Add or update a vault in known vaults list."""

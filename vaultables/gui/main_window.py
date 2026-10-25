@@ -1,4 +1,4 @@
-"""Main application window for ArcVault with fast archive editing and cross-platform drag-and-drop."""
+"""Main application window for Vaultables with fast archive editing and cross-platform drag-and-drop."""
 
 from __future__ import annotations
 
@@ -28,19 +28,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.config import AppConfig
-from arc_vault.core.models import ArchiveItem, FileCategory
-from arc_vault.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError
-from arc_vault.core.vault import Vault
-from arc_vault.gui.breadcrumbs import BreadcrumbBar
-from arc_vault.gui.file_view import FileExplorerView
-from arc_vault.gui.icons import IconProvider
-from arc_vault.gui.logs_panel import LogsPanel
-from arc_vault.gui.preview_panel import PreviewPanel, format_size
-from arc_vault.gui.sidebar import VaultSidebar
-from arc_vault.gui.theme import get_stylesheet
-from arc_vault.gui.vault_dialog import CreateVaultDialog, UnlockVaultDialog
-from arc_vault.gui.workers import (
+from vaultables.config import AppConfig
+from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError
+from vaultables.core.vault import Vault
+from vaultables.gui.breadcrumbs import BreadcrumbBar
+from vaultables.gui.file_view import FileExplorerView
+from vaultables.gui.icons import IconProvider
+from vaultables.gui.logs_panel import LogsPanel
+from vaultables.gui.preview_panel import PreviewPanel, format_size
+from vaultables.gui.sidebar import VaultSidebar
+from vaultables.gui.theme import get_stylesheet
+from vaultables.gui.vault_dialog import CreateVaultDialog, UnlockVaultDialog, CreateEntryPointDialog
+from vaultables.gui.workers import (
     AddFilesWorker,
     ExportFilesWorker,
     ExtractPreviewWorker,
@@ -74,13 +74,13 @@ class MainWindow(QMainWindow):
         self.file_watcher.fileChanged.connect(self._on_watched_file_changed)
         self._watched_files: Dict[str, Tuple[str, str, float, str]] = {}
 
-        self.setWindowTitle("ArcVault - Encrypted Archive Explorer")
+        self.setWindowTitle("Vaultables - Encrypted Archive Explorer")
         self.resize(1180, 740)
         self.setMinimumSize(850, 500)
 
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            icon_path = Path(meipass) / "arc_vault" / "resources" / "icon.png"
+            icon_path = Path(meipass) / "vaultables" / "resources" / "icon.png"
         else:
             icon_path = Path(__file__).parent.parent / "resources" / "icon.png"
         if icon_path.exists():
@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(self.act_preview_toggle)
 
         self.act_about = QAction("About", self)
-        self.act_about.setToolTip("About ArcVault, contributors & special thanks")
+        self.act_about.setToolTip("About Vaultables, contributors & special thanks")
         self.act_about.triggered.connect(self._show_about_dialog)
         self.toolbar.addAction(self.act_about)
 
@@ -294,7 +294,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def _show_about_dialog(self) -> None:
-        from arc_vault.gui.about_dialog import AboutDialog
+        from vaultables.gui.about_dialog import AboutDialog
         dlg = AboutDialog(self, dark_mode=self.dark_mode)
         dlg.exec()
 
@@ -443,7 +443,7 @@ class MainWindow(QMainWindow):
             self.sidebar.refresh_vaults_list()
 
     def _on_rename_vault_display_name(self, vault_path: Optional[Path]) -> None:
-        """Prompt user and change the display name of a vault (persists to .arcvault and config)."""
+        """Prompt user and change the display name of a vault (persists to .vaultables and config)."""
         if not vault_path:
             if self.vault:
                 vault_path = self.vault.root_dir
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
 
         if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
             self.sidebar.set_current_vault(self.vault)
-            self.setWindowTitle(f"ArcVault - {clean_name}")
+            self.setWindowTitle(f"Vaultables - {clean_name}")
             self.refresh_current_view()
 
         self.status_bar.showMessage(f"Vault display name changed to '{clean_name}'.")
@@ -723,24 +723,30 @@ class MainWindow(QMainWindow):
         )
         if ok and chosen:
             if chosen.startswith("+"):
-                name, name_ok = QInputDialog.getText(
-                    self, "New Entry Point", "Enter entry point category name:"
+                dlg = CreateEntryPointDialog(
+                    vault_is_obfuscated=self.vault.obfuscate_names,
+                    parent=self,
+                    dark_mode=self.dark_mode,
                 )
-                if name_ok and name.strip():
-                    clean_name = name.strip().replace(".7z", "")
-                    self.vault.create_entry_point(clean_name)
-                    self.sidebar.refresh_entry_points()
-                    self._on_files_dropped_on_entry_point(files, clean_name)
+                if dlg.exec() == QDialog.DialogCode.Accepted:
+                    clean_name = dlg.get_entry_point_name()
+                    obf_setting = dlg.get_obfuscate_setting()
+                    try:
+                        self.vault.create_entry_point(clean_name, obfuscate=obf_setting)
+                        self.sidebar.refresh_entry_points()
+                        self._on_files_dropped_on_entry_point(files, clean_name)
+                    except Exception as e:
+                        QMessageBox.warning(self, "Error", f"Failed to create entry point: {e}")
             else:
                 self._on_files_dropped_on_entry_point(files, chosen)
 
     def _on_drag_export_requested(self, items: List[ArchiveItem]) -> None:
-        """Native cross-platform drag-out: user drags files OUT of ArcVault to desktop/Finder."""
+        """Native cross-platform drag-out: user drags files OUT of Vaultables to desktop/Finder."""
         if not items or not self.vault or not self.vault.is_unlocked:
             return
 
         # Extract to temporary drag cache
-        temp_drag_dir = Path(tempfile.mkdtemp(prefix="arcvault_drag_out_"))
+        temp_drag_dir = Path(tempfile.mkdtemp(prefix="vaultables_drag_out_"))
         extracted_urls: List[QUrl] = []
 
         ep_name = items[0].entry_point_name or self.active_entry_point
@@ -767,7 +773,7 @@ class MainWindow(QMainWindow):
             "entry_point": ep_name,
             "paths": internal_paths,
         }
-        mime.setData("application/x-arcvault-internal", json.dumps(internal_payload).encode("utf-8"))
+        mime.setData("application/x-vaultables-internal", json.dumps(internal_payload).encode("utf-8"))
         drag.setMimeData(mime)
 
         first_icon = IconProvider.get_category_icon(items[0].category, dark_mode=self.dark_mode, size=32)
@@ -934,13 +940,16 @@ class MainWindow(QMainWindow):
         if not self.vault or not self.vault.is_unlocked:
             return
 
-        name, ok = QInputDialog.getText(
-            self, "New Entry Point", "Enter entry point category name (e.g. photos, work):"
+        dlg = CreateEntryPointDialog(
+            vault_is_obfuscated=self.vault.obfuscate_names,
+            parent=self,
+            dark_mode=self.dark_mode,
         )
-        if ok and name.strip():
-            clean_name = name.strip().replace(".7z", "")
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            clean_name = dlg.get_entry_point_name()
+            obf_setting = dlg.get_obfuscate_setting()
             try:
-                self.vault.create_entry_point(clean_name)
+                self.vault.create_entry_point(clean_name, obfuscate=obf_setting)
                 self.sidebar.refresh_entry_points()
                 self.active_entry_point = clean_name
                 self.current_subfolder = ""
@@ -1186,7 +1195,7 @@ class MainWindow(QMainWindow):
             if hasattr(self.config, "file_column_widths") and self.config.file_column_widths:
                 self.file_view.set_custom_column_widths(self.config.file_column_widths)
         except Exception as e:
-            print(f'[ArcVault] Failed to restore window state: {e}')
+            print(f'[Vaultables] Failed to restore window state: {e}')
 
     def _save_window_state(self) -> None:
         """Save window size, placement, maximized status, and splitter state to config."""
@@ -1203,7 +1212,7 @@ class MainWindow(QMainWindow):
             self.config.theme = 'dark' if self.dark_mode else 'light'
             self.config.save()
         except Exception as e:
-            print(f'[ArcVault] Failed to save window state: {e}')
+            print(f'[Vaultables] Failed to save window state: {e}')
 
     def _on_list_size_changed(self, size_index: int) -> None:
         self.config.file_list_size_index = size_index

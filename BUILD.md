@@ -1,12 +1,12 @@
-# 🛠️ ArcVault Build & Compilation Guide
+# 🛠️ Vaultables Build & Compilation Guide
 
-This document describes how to compile **ArcVault** into portable **"onefile" standalone executables** and native application bundles across **macOS**, **Windows**, and **Linux** using **PyInstaller**.
+This document describes how to compile **Vaultables** into portable **"onefile" standalone executables** and native application bundles across **macOS**, **Windows**, and **Linux** using **PyInstaller**.
 
 ---
 
 ## ⚡ Quick Start: 1-Click Platform Build Scripts
 
-ArcVault includes self-sufficient build scripts in the root directory (and mirrored in `scripts/`). Each script automatically creates a `.venv` virtual environment if missing, upgrades pip, installs all dependencies from `requirements.txt`, synchronizes icons, and builds the distribution:
+Vaultables includes self-sufficient build scripts in the root directory (and mirrored in `scripts/`). Each script automatically creates a `.venv` virtual environment if missing, upgrades pip, installs all dependencies from `requirements.txt`, synchronizes icons, and builds the distribution:
 
 ### 🍎 macOS (Apple Silicon & Intel)
 ```bash
@@ -15,8 +15,8 @@ chmod +x build_mac.sh
 ```
 - **Automatically**:
   - Initializes `.venv` and installs `requirements.txt`.
-  - Regenerates `ArcVault.icns` and `ArcVault.ico` if `icon.png` is updated.
-  - Builds `dist/ArcVault` (portable standalone binary) and `dist/ArcVault.app` (macOS Application Bundle).
+  - Regenerates `Vaultables.icns` and `Vaultables.ico` if `icon.png` is updated.
+  - Builds `dist/Vaultables` (portable standalone binary) and `dist/Vaultables.app` (macOS Application Bundle).
   - Signs with ad-hoc certificates for macOS Gatekeeper.
 
 ### 🪟 Windows (x64)
@@ -30,9 +30,9 @@ Or in PowerShell:
 ```
 - **Automatically**:
   - Initializes `.venv` and installs `requirements.txt`.
-  - Synchronizes multi-resolution `ArcVault.ico` (16x16 to 256x256).
-  - Builds `dist\ArcVault.exe` with embedded icon resources.
-- **USB / Portable Tip**: You can carry `ArcVault.exe` on a USB drive. If 7-Zip is not installed on the host machine, simply drop `7z.exe` and `7z.dll` next to `ArcVault.exe`.
+  - Synchronizes multi-resolution `Vaultables.ico` (16x16 to 256x256).
+  - Builds `dist\Vaultables.exe` with embedded icon resources.
+- **USB / Portable Tip**: You can carry `Vaultables.exe` on a USB drive. If 7-Zip is not installed on the host machine, simply drop `7z.exe` and `7z.dll` next to `Vaultables.exe`.
 
 ### 🐧 Linux (x86_64 & aarch64)
 ```bash
@@ -41,7 +41,7 @@ chmod +x build_linux.sh
 ```
 - **Automatically**:
   - Initializes `.venv` and installs `requirements.txt`.
-  - Builds `dist/ArcVault` (portable standalone ELF binary).
+  - Builds `dist/Vaultables` (portable standalone ELF binary).
 
 ---
 
@@ -60,8 +60,8 @@ chmod +x build_linux.sh
 ### Step 1: Virtual Environment Setup
 
 ```bash
-git clone https://github.com/noobaly-original/arcvault.git
-cd arcvault
+git clone https://github.com/noobaly-original/vaultables.git
+cd vaultables
 
 # Setup virtual environment and dependencies:
 python3 -m venv .venv
@@ -73,21 +73,21 @@ pip install -r requirements.txt
 
 ### Step 2: Compiling with Spec Files
 
-ArcVault provides two specification files:
+Vaultables provides two specification files:
 
-#### 1. Portable Single-File Executable (`arcvault_onefile.spec`)
+#### 1. Portable Single-File Executable (`vaultables_onefile.spec`)
 Packs Python, PyQt6, Pillow, Pygments, and all graphics assets into a single self-extracting executable:
 ```bash
-pyinstaller arcvault_onefile.spec --noconfirm --clean
+pyinstaller vaultables_onefile.spec --noconfirm --clean
 ```
 Output:
-- **macOS / Linux**: `dist/ArcVault`
-- **Windows**: `dist\ArcVault.exe`
+- **macOS / Linux**: `dist/Vaultables`
+- **Windows**: `dist\Vaultables.exe`
 
-#### 2. Native macOS Directory / App Bundle (`arcvault.spec`)
-Builds a standard native macOS bundle (`dist/ArcVault.app`):
+#### 2. Native macOS Directory / App Bundle (`vaultables.spec`)
+Builds a standard native macOS bundle (`dist/Vaultables.app`):
 ```bash
-pyinstaller arcvault.spec --noconfirm --clean
+pyinstaller vaultables.spec --noconfirm --clean
 ```
 
 ---
@@ -96,24 +96,24 @@ pyinstaller arcvault.spec --noconfirm --clean
 
 ### macOS (.icns):
 ```bash
-mkdir -p /tmp/ArcVault.iconset
-sips -z 16 16     arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_16x16.png
-sips -z 32 32     arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_16x16@2x.png
-sips -z 32 32     arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_32x32.png
-sips -z 64 64     arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_32x32@2x.png
-sips -z 128 128   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_128x128.png
-sips -z 256 256   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_128x128@2x.png
-sips -z 256 256   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_256x256.png
-sips -z 512 512   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_256x256@2x.png
-sips -z 512 512   arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_512x512.png
-sips -z 1024 1024 arc_vault/resources/icon.png --out /tmp/ArcVault.iconset/icon_512x512@2x.png
-iconutil -c icns /tmp/ArcVault.iconset -o arc_vault/resources/ArcVault.icns
-rm -rf /tmp/ArcVault.iconset
+mkdir -p /tmp/Vaultables.iconset
+sips -z 16 16     vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_16x16.png
+sips -z 32 32     vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_16x16@2x.png
+sips -z 32 32     vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_32x32.png
+sips -z 64 64     vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_32x32@2x.png
+sips -z 128 128   vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_128x128.png
+sips -z 256 256   vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_128x128@2x.png
+sips -z 256 256   vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_256x256.png
+sips -z 512 512   vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_256x256@2x.png
+sips -z 512 512   vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_512x512.png
+sips -z 1024 1024 vaultables/resources/icon.png --out /tmp/Vaultables.iconset/icon_512x512@2x.png
+iconutil -c icns /tmp/Vaultables.iconset -o vaultables/resources/Vaultables.icns
+rm -rf /tmp/Vaultables.iconset
 ```
 
 ### Windows (.ico):
 ```bash
-python -c "from PIL import Image; Image.open('arc_vault/resources/icon.png').save('arc_vault/resources/ArcVault.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+python -c "from PIL import Image; Image.open('vaultables/resources/icon.png').save('vaultables/resources/Vaultables.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
 ```
 
 ---
@@ -123,21 +123,21 @@ python -c "from PIL import Image; Image.open('arc_vault/resources/icon.png').sav
 ### macOS:
 ```bash
 # Run the portable standalone binary:
-./dist/ArcVault
+./dist/Vaultables
 
 # Or launch the macOS app bundle:
-open dist/ArcVault.app
+open dist/Vaultables.app
 ```
 
 ### Linux:
 ```bash
-./dist/ArcVault
+./dist/Vaultables
 ```
 
 ### Windows:
-Double-click `dist\ArcVault.exe` or execute from Command Prompt / PowerShell:
+Double-click `dist\Vaultables.exe` or execute from Command Prompt / PowerShell:
 ```cmd
-.\dist\ArcVault.exe
+.\dist\Vaultables.exe
 ```
 
 ---
@@ -145,20 +145,20 @@ Double-click `dist\ArcVault.exe` or execute from Command Prompt / PowerShell:
 ## 🔍 CLI Inspection
 The portable binary also supports command-line flags:
 ```bash
-./dist/ArcVault --version
-./dist/ArcVault --help
+./dist/Vaultables --version
+./dist/Vaultables --help
 ```
 
 ---
 
 ## 🚀 Automated Multi-Platform GitHub Releases (CI/CD)
 
-ArcVault includes a turnkey GitHub Actions workflow (`.github/workflows/release.yml`) that compiles native binaries across all major platforms and architectures on cloud runners:
+Vaultables includes a turnkey GitHub Actions workflow (`.github/workflows/release.yml`) that compiles native binaries across all major platforms and architectures on cloud runners:
 
-- **Windows x64 (AMD64)**: `ArcVault-Windows-x64.exe`
-- **Linux x64 (AMD64)**: `ArcVault-Linux-x64` & `ArcVault-Linux-x64.tar.gz`
-- **macOS Apple Silicon (ARM64)**: `ArcVault-macOS-arm64` & `ArcVault-macOS-arm64.app.zip`
-- **macOS Intel (x86_64 / AMD64)**: `ArcVault-macOS-x86_64` & `ArcVault-macOS-x86_64.app.zip`
+- **Windows x64 (AMD64)**: `Vaultables-Windows-x64.exe`
+- **Linux x64 (AMD64)**: `Vaultables-Linux-x64` & `Vaultables-Linux-x64.tar.gz`
+- **macOS Apple Silicon (ARM64)**: `Vaultables-macOS-arm64` & `Vaultables-macOS-arm64.app.zip`
+- **macOS Intel (x86_64 / AMD64)**: `Vaultables-macOS-x86_64` & `Vaultables-macOS-x86_64.app.zip`
 - **SHA256 Checksums**: `SHA256SUMS.txt`
 
 ### To Trigger an Automated Release:

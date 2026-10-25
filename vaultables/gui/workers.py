@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
-from arc_vault.core.models import ArchiveItem, FileCategory
-from arc_vault.core.vault import Vault
+from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.core.vault import Vault
 
 
 class UnlockWorker(QThread):

@@ -36,13 +36,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p staging
-          cp dist/ArcVault.exe staging/ArcVault-Windows-x64.exe
+          cp dist/Vaultables.exe staging/Vaultables-Windows-x64.exe
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArcVault-Windows-x64
-          path: staging/ArcVault-Windows-x64.exe
+          name: Vaultables-Windows-x64
+          path: staging/Vaultables-Windows-x64.exe
 
   # ============================================================================
   # 2. Linux x64 (AMD64)
@@ -73,19 +73,19 @@ jobs:
       - name: Prepare Linux Release Artifacts
         run: |
           mkdir -p staging
-          cp dist/ArcVault staging/ArcVault-Linux-x64
-          chmod +x staging/ArcVault-Linux-x64
+          cp dist/Vaultables staging/Vaultables-Linux-x64
+          chmod +x staging/Vaultables-Linux-x64
           cd staging
-          tar -czvf ArcVault-Linux-x64.tar.gz ArcVault-Linux-x64
+          tar -czvf Vaultables-Linux-x64.tar.gz Vaultables-Linux-x64
           cd ..
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ArcVault-Linux-x64
+          name: Vaultables-Linux-x64
           path: |
-            staging/ArcVault-Linux-x64
-            staging/ArcVault-Linux-x64.tar.gz
+            staging/Vaultables-Linux-x64
+            staging/Vaultables-Linux-x64.tar.gz
 
   # ============================================================================
   # 3. macOS Apple Silicon (ARM64)
@@ -115,17 +115,17 @@ jobs:
       - name: Package macOS ARM64 Artifacts
         run: |
           mkdir -p staging
-          cp dist/ArcVault staging/ArcVault-macOS-arm64
-          chmod +x staging/ArcVault-macOS-arm64
-          ditto -c -k --sequesterRsrc --keepParent dist/ArcVault.app staging/ArcVault-macOS-arm64.app.zip
+          cp dist/Vaultables staging/Vaultables-macOS-arm64
+          chmod +x staging/Vaultables-macOS-arm64
+          ditto -c -k --sequesterRsrc --keepParent dist/Vaultables.app staging/Vaultables-macOS-arm64.app.zip
 
       - name: Upload macOS ARM64 Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ArcVault-macOS-arm64
+          name: Vaultables-macOS-arm64
           path: |
-            staging/ArcVault-macOS-arm64
-            staging/ArcVault-macOS-arm64.app.zip
+            staging/Vaultables-macOS-arm64
+            staging/Vaultables-macOS-arm64.app.zip
 
   # ============================================================================
   # 4. macOS Intel (x86_64 / AMD64)
@@ -155,17 +155,17 @@ jobs:
       - name: Package macOS Intel Artifacts
         run: |
           mkdir -p staging
-          cp dist/ArcVault staging/ArcVault-macOS-x86_64
-          chmod +x staging/ArcVault-macOS-x86_64
-          ditto -c -k --sequesterRsrc --keepParent dist/ArcVault.app staging/ArcVault-macOS-x86_64.app.zip
+          cp dist/Vaultables staging/Vaultables-macOS-x86_64
+          chmod +x staging/Vaultables-macOS-x86_64
+          ditto -c -k --sequesterRsrc --keepParent dist/Vaultables.app staging/Vaultables-macOS-x86_64.app.zip
 
       - name: Upload macOS Intel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ArcVault-macOS-x86_64
+          name: Vaultables-macOS-x86_64
           path: |
-            staging/ArcVault-macOS-x86_64
-            staging/ArcVault-macOS-x86_64.app.zip
+            staging/Vaultables-macOS-x86_64
+            staging/Vaultables-macOS-x86_64.app.zip
 
   # ============================================================================
   # 5. Publish Multi-Platform GitHub Release

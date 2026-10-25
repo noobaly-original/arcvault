@@ -33,8 +33,8 @@ try:
 except ImportError:
     HAS_PYGMENTS = False
 
-from arc_vault.core.models import ArchiveItem, FileCategory
-from arc_vault.gui.icons import IconProvider
+from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.gui.icons import IconProvider
 
 
 def format_size(bytes_size: int) -> str:
@@ -85,7 +85,7 @@ class PreviewPanel(QWidget):
         # In-App Edit & Save buttons for text/code
         self.btn_edit_text = QToolButton(self)
         self.btn_edit_text.setText("Edit")
-        self.btn_edit_text.setToolTip("Edit text directly inside ArcVault")
+        self.btn_edit_text.setToolTip("Edit text directly inside Vaultables")
         self.btn_edit_text.clicked.connect(self._toggle_text_edit_mode)
         self.btn_edit_text.setVisible(False)
         header_layout.addWidget(self.btn_edit_text)
@@ -395,7 +395,7 @@ class PreviewPanel(QWidget):
             self.btn_edit_text.setToolTip("File too large for in-app editing. Use Edit Externally.")
         else:
             self.btn_edit_text.setEnabled(True)
-            self.btn_edit_text.setToolTip("Edit text directly inside ArcVault")
+            self.btn_edit_text.setToolTip("Edit text directly inside Vaultables")
 
         if HAS_PYGMENTS:
             try:
@@ -514,7 +514,7 @@ class PreviewPanel(QWidget):
             else:
                 subprocess.Popen(["xdg-open", path_str])
         except Exception as e:
-            print(f"[ArcVault] Failed to open external app: {e}")
+            print(f"[Vaultables] Failed to open external app: {e}")
 
     def _on_edit_external_clicked(self) -> None:
         if self.current_item:

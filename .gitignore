@@ -36,6 +36,7 @@ ENV/
 # Skills
 skills/
 
-# ArcVault Local Cache
+# Vaultables Local Cache
 .cache/
+.vaultables_temp/
 .arcvault_temp/

@@ -1,4 +1,4 @@
-"""Minimalist, modern styling and themes (Dark & Light) for ArcVault."""
+"""Minimalist, modern styling and themes (Dark & Light) for Vaultables."""
 
 from __future__ import annotations
 

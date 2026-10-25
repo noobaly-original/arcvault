@@ -1,6 +1,6 @@
 # ==============================================================================
-# ArcVault - Windows PowerShell Build Script
-# Builds a portable "onefile" standalone executable (ArcVault.exe).
+# Vaultables - Windows PowerShell Build Script
+# Builds a portable "onefile" standalone executable (Vaultables.exe).
 # Automatically sets up .venv and installs requirements.txt.
 # ==============================================================================
 
@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "          ArcVault - Windows Build & Packaging            " -ForegroundColor Cyan
+Write-Host "          Vaultables - Windows Build & Packaging            " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Check for uv or host Python
@@ -59,23 +59,23 @@ if ($HasUv) {
 }
 
 # 4. Ensure Windows .ico icon is up to date
-if (Test-Path "arc_vault\resources\icon.png") {
-    & $PythonExe -c "from PIL import Image; from pathlib import Path; p = Path('arc_vault/resources/icon.png'); i = Path('arc_vault/resources/ArcVault.ico'); (not i.exists() or p.stat().st_mtime > i.stat().st_mtime) and Image.open(p).save(i, format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" 2>$null
+if (Test-Path "vaultables\resources\icon.png") {
+    & $PythonExe -c "from PIL import Image; from pathlib import Path; p = Path('vaultables/resources/icon.png'); i = Path('vaultables/resources/Vaultables.ico'); (not i.exists() or p.stat().st_mtime > i.stat().st_mtime) and Image.open(p).save(i, format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" 2>$null
 }
 
 # 5. Clean previous builds
 if ($Clean -or (Test-Path "build")) {
     Write-Host "[*] Cleaning build directory..." -ForegroundColor Yellow
-    if (Test-Path "build\arcvault") { Remove-Item -Recurse -Force "build\arcvault" }
-    if (Test-Path "build\arcvault_onefile") { Remove-Item -Recurse -Force "build\arcvault_onefile" }
+    if (Test-Path "build\vaultables") { Remove-Item -Recurse -Force "build\vaultables" }
+    if (Test-Path "build\vaultables_onefile") { Remove-Item -Recurse -Force "build\vaultables_onefile" }
 }
 
 # 6. Build Portable Standalone Onefile Executable with .ico embedding
-Write-Host "[*] Compiling portable standalone Windows executable with ArcVault.ico..." -ForegroundColor Yellow
-& $PythonExe -m PyInstaller arcvault_onefile.spec --noconfirm --clean
+Write-Host "[*] Compiling portable standalone Windows executable with Vaultables.ico..." -ForegroundColor Yellow
+& $PythonExe -m PyInstaller vaultables_onefile.spec --noconfirm --clean
 
 # 7. Verify and display output
-$OutputExe = "dist\ArcVault.exe"
+$OutputExe = "dist\Vaultables.exe"
 if (Test-Path $OutputExe) {
     $Item = Get-Item $OutputExe
     $SizeMB = [math]::Round($Item.Length / 1MB, 2)
@@ -88,7 +88,7 @@ if (Test-Path $OutputExe) {
     Write-Host "Portable Deployment Tip:" -ForegroundColor Gray
     Write-Host "  You can copy '$OutputExe' to any folder or USB drive." -ForegroundColor Gray
     Write-Host "  If 7-Zip is not installed globally on the target machine," -ForegroundColor Gray
-    Write-Host "  simply copy '7z.exe' and '7z.dll' next to 'ArcVault.exe'." -ForegroundColor Gray
+    Write-Host "  simply copy '7z.exe' and '7z.dll' next to 'Vaultables.exe'." -ForegroundColor Gray
     Write-Host "==========================================================" -ForegroundColor Green
 } else {
     Write-Error "Build finished but $OutputExe was not found."

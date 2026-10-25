@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.gui.icons import IconProvider
-from arc_vault.logger import LogEntry, clear_log_history, get_log_history, log_emitter
+from vaultables.gui.icons import IconProvider
+from vaultables.logger import LogEntry, clear_log_history, get_log_history, log_emitter
 
 
 class LogsPanel(QWidget):

@@ -6,19 +6,19 @@ import sys
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from arc_vault import __app_name__, __version__
-from arc_vault.config import AppConfig
-from arc_vault.gui.main_window import MainWindow
+from vaultables import __app_name__, __version__
+from vaultables.config import AppConfig
+from vaultables.gui.main_window import MainWindow
 
 
 def main() -> int:
-    """Initialize and run ArcVault application."""
+    """Initialize and run Vaultables application."""
     if "--version" in sys.argv or "-v" in sys.argv:
         print(f"{__app_name__} v{__version__}")
         return 0
     if "--help" in sys.argv or "-h" in sys.argv:
         print(f"{__app_name__} v{__version__} - Encrypted Archive Explorer")
-        print("Usage: arcvault [OPTIONS]")
+        print("Usage: vaultables [OPTIONS]")
         print("  -v, --version  Show application version and exit")
         print("  -h, --help     Show this help message and exit")
         return 0
@@ -30,7 +30,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
     app.setApplicationVersion(__version__)
-    app.setOrganizationName("ArcVault")
+    app.setOrganizationName("Vaultables")
 
     config = AppConfig()
     window = MainWindow(config)

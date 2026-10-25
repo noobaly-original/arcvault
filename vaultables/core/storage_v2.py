@@ -1,8 +1,8 @@
-"""V2 Chunked and Metadata-Decoupled Storage Engine for ArcVault.
+"""V2 Chunked and Metadata-Decoupled Storage Engine for Vaultables.
 
 Under V2:
 - Vault root contains lightweight encrypted {entry_point}.7z metadata archives.
-- Vault root contains 'arc-data/' holding encrypted file and folder chunks.
+- Vault root contains 'vaultables-data/' holding encrypted file and folder chunks.
 - Files > 1GB are shredded into 1GB encrypted chunks with 7-Zip store mode (-mx=0) and AES-256 (-mhe=on).
 - Files <= 1GB skip shredding and are stored as a single encrypted chunk_000.7z.
 - Metadata is projected onto the UI as virtual files and folders.
@@ -22,9 +22,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from arc_vault.core.models import ArchiveItem, FileCategory, classify_file
-from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
-from arc_vault.logger import log_error, log_info, log_warning
+from vaultables.core.models import ArchiveItem, FileCategory, classify_file
+from vaultables.core.sevenzip import SevenZip, SevenZipOperationError
+from vaultables.logger import log_error, log_info, log_warning
 
 # Default chunk size: 1 GB (1024 * 1024 * 1024 bytes)
 DEFAULT_CHUNK_SIZE: int = 1024 * 1024 * 1024
@@ -69,7 +69,7 @@ class V2ItemMetadata:
     path: str              # Internal path, e.g. "family/photo.png" or "family"
     name: str              # e.g. "photo.png"
     is_dir: bool = False
-    item_id: str = ""      # Random alphanumeric directory name in arc-data/{ep_dir_id}/{item_id} or human path
+    item_id: str = ""      # Random alphanumeric directory name in vaultables-data/{ep_dir_id}/{item_id} or human path
     size: int = 0          # Total uncompressed size
     packed_size: int = 0   # Total encrypted size on disk
     modified: str = ""
@@ -115,14 +115,24 @@ class V2EntryPointMetadata:
 
     version: str = "2.0"
     entry_point_name: str = ""
-    ep_dir_id: str = ""    # Folder name under vault_root / "arc-data" / ep_dir_id
+    ep_dir_id: str = ""    # Folder name under vault_root / "vaultables-data" / ep_dir_id
+    obfuscate_names: Optional[bool] = None  # None for legacy, bool when explicitly set
     items: Dict[str, V2ItemMetadata] = field(default_factory=dict)
+
+    def is_obfuscated(self, default_vault_setting: bool = True) -> bool:
+        """Determine whether items in this entry point are obfuscated."""
+        if self.obfuscate_names is not None:
+            return bool(self.obfuscate_names)
+        if self.ep_dir_id:
+            return self.ep_dir_id != self.entry_point_name
+        return default_vault_setting
 
     def to_json(self) -> str:
         data = {
             "version": self.version,
             "entry_point_name": self.entry_point_name,
             "ep_dir_id": self.ep_dir_id,
+            "obfuscate_names": self.obfuscate_names,
             "items": {p: item.to_dict() for p, item in self.items.items()},
         }
         return json.dumps(data, indent=2)
@@ -135,10 +145,15 @@ class V2EntryPointMetadata:
         for p, item_dict in items_raw.items():
             parsed_items[p] = V2ItemMetadata.from_dict(item_dict)
 
+        obf = data.get("obfuscate_names")
+        if obf is not None:
+            obf = bool(obf)
+
         return cls(
             version=data.get("version", "2.0"),
             entry_point_name=data.get("entry_point_name", ""),
             ep_dir_id=data.get("ep_dir_id", ""),
+            obfuscate_names=obf,
             items=parsed_items,
         )
 
@@ -158,7 +173,7 @@ class V2StorageEngine:
         arc_data_root: Path,
         obfuscate_names: bool = True,
     ) -> V2EntryPointMetadata:
-        """Create a new V2 metadata archive and its arc-data directory."""
+        """Create a new V2 metadata archive and its vaultables-data directory."""
         if obfuscate_names:
             ep_dir_id = generate_unique_folder_id(arc_data_root, 12)
         else:
@@ -170,6 +185,7 @@ class V2StorageEngine:
             version="2.0",
             entry_point_name=entry_point_name,
             ep_dir_id=ep_dir_id,
+            obfuscate_names=obfuscate_names,
             items={},
         )
         self.save_metadata(archive_path, meta, password)

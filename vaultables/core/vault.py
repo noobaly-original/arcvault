@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from arc_vault.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file
-from arc_vault.core.sevenzip import SevenZip, SevenZipOperationError
-from arc_vault.core.storage_v2 import (
+from vaultables.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file
+from vaultables.core.sevenzip import SevenZip, SevenZipOperationError
+from vaultables.core.storage_v2 import (
     DEFAULT_CHUNK_SIZE,
     METADATA_FILENAME,
     V2EntryPointMetadata,
@@ -23,7 +23,7 @@ from arc_vault.core.storage_v2 import (
     generate_random_id,
     generate_unique_folder_id,
 )
-from arc_vault.logger import log_info, log_warning
+from vaultables.logger import log_info, log_warning
 
 
 class VaultUnlockError(Exception):
@@ -38,19 +38,19 @@ class VaultExistsError(FileExistsError):
 
 class Vault:
     """
-    Manages an ArcVault root directory, its encrypted metadata entry points,
-    and the decoupled chunked storage in 'arc-data/'.
+    Manages an Vaultables root directory, its encrypted metadata entry points,
+    and the decoupled chunked storage in 'vaultables-data/'.
     """
 
-    MARKER_FILENAME = ".arcvault"
+    MARKER_FILENAME = ".vaultables"
     CHECK_FILENAME = ".vault_check.7z"
-    ARC_DATA_DIRNAME = "arc-data"
+    ARC_DATA_DIRNAME = "vaultables-data"
     IMPORT_DIRNAME = "import"
     IMPORTS_ENTRY_POINT_NAME = "imports"
 
     @classmethod
     def is_vault_dir(cls, directory: Path) -> bool:
-        """Check if directory is an existing ArcVault root."""
+        """Check if directory is an existing Vaultables root."""
         if not directory.exists() or not directory.is_dir():
             return False
 
@@ -58,8 +58,8 @@ class Vault:
         if (directory / cls.CHECK_FILENAME).is_file():
             return True
 
-        # 2. Primary metadata marker file (.arcvault)
-        # Note: Must be a regular file, NOT a directory (e.g. ~/.arcvault config dir)
+        # 2. Primary metadata marker file (.vaultables)
+        # Note: Must be a regular file, NOT a directory (e.g. ~/.vaultables config dir)
         marker = directory / cls.MARKER_FILENAME
         if marker.is_file():
             try:
@@ -69,8 +69,8 @@ class Vault:
             except Exception:
                 pass
 
-        # 3. Alternate metadata marker file (.arcvault_vault)
-        alt = directory / ".arcvault_vault"
+        # 3. Alternate metadata marker file (.vaultables_vault)
+        alt = directory / ".vaultables_vault"
         if alt.is_file():
             try:
                 data = json.loads(alt.read_text(encoding="utf-8"))
@@ -142,10 +142,10 @@ class Vault:
             self._edit_staging_dir = None
 
     def _read_metadata(self) -> None:
-        """Read .arcvault metadata if it exists."""
+        """Read .vaultables metadata if it exists."""
         marker = self.root_dir / self.MARKER_FILENAME
         if not marker.is_file():
-            alt_marker = self.root_dir / ".arcvault_vault"
+            alt_marker = self.root_dir / ".vaultables_vault"
             if alt_marker.is_file():
                 marker = alt_marker
 
@@ -181,7 +181,7 @@ class Vault:
     def set_display_name(self, new_name: str) -> None:
         """
         Update the display name of the vault in its metadata without changing its physical root directory.
-        Persists the change in the .arcvault metadata file.
+        Persists the change in the .vaultables metadata file.
         """
         clean_name = new_name.strip()
         if not clean_name:
@@ -215,6 +215,15 @@ class Vault:
             return self.metadata.obfuscate_names
         return True
 
+    def is_entry_point_obfuscated(self, entry_point_name: str) -> bool:
+        """Return whether a specific entry point is obfuscated."""
+        if not self.is_unlocked:
+            return self.obfuscate_names
+        meta = self._v2_metadata.get(entry_point_name)
+        if meta:
+            return meta.is_obfuscated(self.obfuscate_names)
+        return self.obfuscate_names
+
     @classmethod
     def create_vault(
         cls,
@@ -226,7 +235,7 @@ class Vault:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         obfuscate_names: bool = True,
     ) -> Vault:
-        """Create a new vault directory with marker, verification check, and arc-data folder."""
+        """Create a new vault directory with marker, verification check, and vaultables-data folder."""
         # Safeguard: prevent creating a vault inside or at an existing vault folder
         enclosing = cls.find_enclosing_vault(root_dir)
         if enclosing:
@@ -274,7 +283,7 @@ class Vault:
             for ep_name in initial_entry_points:
                 clean_name = ep_name.strip()
                 if clean_name:
-                    vault.create_entry_point(clean_name)
+                    vault.create_entry_point(clean_name, obfuscate=obfuscate_names)
 
         vault.ensure_import_readme()
         log_info(f"Created new vault '{name}' at {root_dir} (obfuscate_names={obfuscate_names})", category="SECURITY")
@@ -347,12 +356,12 @@ class Vault:
 
     def get_preview_temp_dir(self) -> Path:
         if not self._temp_preview_dir:
-            self._temp_preview_dir = tempfile.TemporaryDirectory(prefix="arcvault_preview_")
+            self._temp_preview_dir = tempfile.TemporaryDirectory(prefix="vaultables_preview_")
         return Path(self._temp_preview_dir.name)
 
     def get_edit_staging_dir(self) -> Path:
         if not self._edit_staging_dir:
-            self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="arcvault_watched_edit_")
+            self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="vaultables_watched_edit_")
         return Path(self._edit_staging_dir.name)
 
     def ensure_import_readme(self) -> None:
@@ -362,26 +371,26 @@ class Vault:
             readme_file = self.import_dir / "README.txt"
             readme_content = (
                 "================================================================================\n"
-                "                       ArcVault Off-site Import Folder\n"
+                "                       Vaultables Off-site Import Folder\n"
                 "================================================================================\n\n"
-                "This folder serves as an off-site file mailbox for your encrypted ArcVault.\n"
+                "This folder serves as an off-site file mailbox for your encrypted Vaultables.\n"
                 "It allows you to securely import files from mobile devices (iPhone, iPad, Android)\n"
-                "or other computers where the ArcVault desktop application is not installed.\n\n"
+                "or other computers where the Vaultables desktop application is not installed.\n\n"
                 "--------------------------------------------------------------------------------\n"
                 "HOW TO USE THIS FOLDER:\n"
                 "--------------------------------------------------------------------------------\n"
                 "1. Compress the files or folders you want to import into a standard '.7z' archive\n"
                 "   using any archiving tool on your device (e.g. Keka, iZip, 7-Zip, NanaZip, PeaZip).\n\n"
-                "2. Set the encryption password on the archive to your ArcVault master password.\n"
+                "2. Set the encryption password on the archive to your Vaultables master password.\n"
                 "   (Header encryption / -mhe=on is strongly recommended).\n\n"
                 "3. Move, copy, or sync the '.7z' archive(s) into this 'import/' folder\n"
                 "   (via Google Drive, iCloud, Nextcloud, Dropbox, AirDrop, USB, etc.).\n\n"
-                "4. Unlock your vault in ArcVault, or click 'Check Imports' in the toolbar.\n\n"
+                "4. Unlock your vault in Vaultables, or click 'Check Imports' in the toolbar.\n\n"
                 "--------------------------------------------------------------------------------\n"
-                "WHAT ARCVAULT DOES AUTOMATICALLY:\n"
+                "WHAT VAULTABLES DOES AUTOMATICALLY:\n"
                 "--------------------------------------------------------------------------------\n"
                 "- Tests the archive to verify it is protected with your vault master password.\n"
-                "- Temporarily extracts and re-encrypts the files into ArcVault's storage engine.\n"
+                "- Temporarily extracts and re-encrypts the files into Vaultables's storage engine.\n"
                 "- Strictly respects your vault's obfuscation settings:\n"
                 "    * If obfuscation is ENABLED: Stores files under randomized privacy IDs.\n"
                 "    * If obfuscation is DISABLED: Preserves human-readable folder and file paths.\n"
@@ -474,7 +483,7 @@ class Vault:
 
                     extracted_items = [
                         p for p in random_stage.iterdir()
-                        if p.name not in (".arcvault_init", METADATA_FILENAME)
+                        if p.name not in (".vaultables_init", METADATA_FILENAME)
                     ]
 
                     # 4. Incorporate into 'imports' entry point
@@ -533,7 +542,7 @@ class Vault:
             meta = self._load_or_migrate_entry_point(ep_name, file)
             self._v2_metadata[ep_name] = meta
 
-            # Calculate total size on disk (archive file + chunk files in arc-data/{ep_dir_id})
+            # Calculate total size on disk (archive file + chunk files in vaultables-data/{ep_dir_id})
             size_on_disk = file.stat().st_size
             ep_data_dir = self.arc_data_dir / meta.ep_dir_id
             if ep_data_dir.exists():
@@ -582,7 +591,7 @@ class Vault:
                 self.sevenzip.extract_to_destination(ep_file, [], self.password, ext_path)
 
                 for item in legacy_items:
-                    if item.name in (METADATA_FILENAME, ".arcvault_init"):
+                    if item.name in (METADATA_FILENAME, ".vaultables_init"):
                         continue
                     clean_path = item.path.strip("/").replace("\\", "/")
                     if self.obfuscate_names:
@@ -628,8 +637,11 @@ class Vault:
         log_info(f"Successfully migrated '{ep_name}.7z' to V2 format ({len(meta.items)} items).")
         return meta
 
-    def create_entry_point(self, name: str) -> EntryPoint:
-        """Create a new V2 entry point archive."""
+    def create_entry_point(self, name: str, obfuscate: Optional[bool] = None) -> EntryPoint:
+        """Create a new V2 entry point archive.
+        If obfuscate is None, inherits self.obfuscate_names.
+        If obfuscate is bool, overrides obfuscation setting for this entry point.
+        """
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -641,8 +653,10 @@ class Vault:
         if ep_file.exists():
             raise FileExistsError(f"Entry point '{clean_name}' already exists.")
 
+        target_obfuscate = self.obfuscate_names if obfuscate is None else bool(obfuscate)
+
         meta = self.v2_engine.create_entry_point_archive(
-            ep_file, clean_name, self.password, self.arc_data_dir, obfuscate_names=self.obfuscate_names
+            ep_file, clean_name, self.password, self.arc_data_dir, obfuscate_names=target_obfuscate
         )
         self._v2_metadata[clean_name] = meta
         self._cache[clean_name] = []
@@ -653,11 +667,11 @@ class Vault:
             size_on_disk=ep_file.stat().st_size if ep_file.exists() else 0,
         )
         self.entry_points[clean_name] = ep
-        log_info(f"Created new V2 entry point '{clean_name}.7z'")
+        log_info(f"Created new V2 entry point '{clean_name}.7z' (obfuscated={target_obfuscate})")
         return ep
 
     def delete_entry_point(self, name: str) -> bool:
-        """Delete an entire entry point and its data directory in arc-data."""
+        """Delete an entire entry point and its data directory in vaultables-data."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -702,7 +716,8 @@ class Vault:
 
         if meta:
             meta.entry_point_name = clean_new
-            if not self.obfuscate_names:
+            is_obf = meta.is_obfuscated(self.obfuscate_names)
+            if not is_obf:
                 old_ep_dir = self.arc_data_dir / meta.ep_dir_id
                 new_ep_dir = self.arc_data_dir / clean_new
                 if old_ep_dir.exists():
@@ -740,7 +755,7 @@ class Vault:
 
         items: List[ArchiveItem] = []
         for item_meta in meta.items.values():
-            if item_meta.name == METADATA_FILENAME or item_meta.name == ".arcvault_init":
+            if item_meta.name == METADATA_FILENAME or item_meta.name == ".vaultables_init":
                 continue
             items.append(item_meta.to_archive_item(entry_point_name))
 
@@ -900,7 +915,7 @@ class Vault:
     ) -> bool:
         """
         Add local files or directories into the entry point without re-archiving existing files.
-        Chunks files > 1GB into 1GB store-mode AES-256 encrypted parts under arc-data.
+        Chunks files > 1GB into 1GB store-mode AES-256 encrypted parts under vaultables-data.
         """
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
@@ -947,8 +962,9 @@ class Vault:
         """Encrypt and record a single file."""
         clean_name = source_file.name
         rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
 
-        if self.obfuscate_names:
+        if is_obf:
             if rel_path in meta.items and meta.items[rel_path].item_id:
                 old_dir = ep_data_dir / meta.items[rel_path].item_id
                 if old_dir.exists():
@@ -959,7 +975,7 @@ class Vault:
             item_id = rel_path
 
         item_dir = ep_data_dir / item_id
-        if not self.obfuscate_names and item_dir.exists():
+        if not is_obf and item_dir.exists():
             shutil.rmtree(item_dir, ignore_errors=True)
 
         size, packed, chunks = self.v2_engine.chunk_and_encrypt_file(
@@ -995,7 +1011,8 @@ class Vault:
         rel_dir_path = f"{parent_subfolder}/{dir_name}".strip("/") if parent_subfolder else dir_name
 
         # Create folder item
-        if self.obfuscate_names:
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        if is_obf:
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:
@@ -1029,7 +1046,8 @@ class Vault:
         clean_name = new_folder_name.strip()
         target_path = f"{parent_subfolder}/{clean_name}".strip("/") if parent_subfolder else clean_name
 
-        if self.obfuscate_names:
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        if is_obf:
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:
@@ -1054,7 +1072,7 @@ class Vault:
         return True
 
     def delete_item(self, entry_point_name: str, internal_path: str) -> bool:
-        """Delete an item or directory and remove its chunks from arc-data without re-archiving other files."""
+        """Delete an item or directory and remove its chunks from vaultables-data without re-archiving other files."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
@@ -1078,7 +1096,8 @@ class Vault:
                 if item_dir.exists():
                     shutil.rmtree(item_dir, ignore_errors=True)
 
-        if not self.obfuscate_names:
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        if not is_obf:
             parent = (ep_data_dir / clean_path).parent
             while parent != ep_data_dir and parent.exists():
                 try:
@@ -1113,7 +1132,8 @@ class Vault:
         if not affected_items:
             return False
 
-        if not self.obfuscate_names:
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        if not is_obf:
             old_disk_dir = ep_data_dir / clean_old
             new_disk_dir = ep_data_dir / clean_new
             if old_disk_dir.exists():
@@ -1125,12 +1145,12 @@ class Vault:
             if p == clean_old:
                 item.path = clean_new
                 item.name = clean_new.split("/")[-1]
-                if not self.obfuscate_names:
+                if not is_obf:
                     item.item_id = clean_new
             else:
                 rel = p[len(clean_old) + 1:]
                 item.path = f"{clean_new}/{rel}"
-                if not self.obfuscate_names:
+                if not is_obf:
                     item.item_id = item.path
             meta.items[item.path] = item
 

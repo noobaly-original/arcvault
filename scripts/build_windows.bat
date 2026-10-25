@@ -1,15 +1,15 @@
 @echo off
 rem ==============================================================================
-rem ArcVault - Windows Build Script (Batch)
-rem Builds a portable "onefile" standalone executable (ArcVault.exe).
+rem Vaultables - Windows Build Script (Batch)
+rem Builds a portable "onefile" standalone executable (Vaultables.exe).
 rem Automatically sets up .venv and installs requirements.txt.
 rem ==============================================================================
 
 setlocal enabledelayedexpansion
-title ArcVault Windows Builder
+title Vaultables Windows Builder
 
 echo ==========================================================
-echo          ArcVault - Windows Build ^& Packaging
+echo          Vaultables - Windows Build ^& Packaging
 echo ==========================================================
 
 rem 1. Locate host Python or uv
@@ -71,18 +71,18 @@ if "%HAS_UV%"=="1" (
 )
 
 rem 4. Ensure Windows .ico icon is up to date
-if exist "arc_vault\resources\icon.png" (
-    %PYTHON_CMD% -c "from PIL import Image; from pathlib import Path; p = Path('arc_vault/resources/icon.png'); i = Path('arc_vault/resources/ArcVault.ico'); (not i.exists() or p.stat().st_mtime > i.stat().st_mtime) and Image.open(p).save(i, format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>nul
+if exist "vaultables\resources\icon.png" (
+    %PYTHON_CMD% -c "from PIL import Image; from pathlib import Path; p = Path('vaultables/resources/icon.png'); i = Path('vaultables/resources/Vaultables.ico'); (not i.exists() or p.stat().st_mtime > i.stat().st_mtime) and Image.open(p).save(i, format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])" >nul 2>nul
 )
 
 rem 5. Clean prior build files
 echo [*] Cleaning build directory...
-if exist "build\arcvault" rmdir /s /q "build\arcvault"
-if exist "build\arcvault_onefile" rmdir /s /q "build\arcvault_onefile"
+if exist "build\vaultables" rmdir /s /q "build\vaultables"
+if exist "build\vaultables_onefile" rmdir /s /q "build\vaultables_onefile"
 
 rem 6. Build Portable Standalone Onefile Executable with .ico embedding
-echo [*] Compiling portable standalone Windows executable with ArcVault.ico...
-%PYTHON_CMD% -m PyInstaller arcvault_onefile.spec --noconfirm --clean
+echo [*] Compiling portable standalone Windows executable with Vaultables.ico...
+%PYTHON_CMD% -m PyInstaller vaultables_onefile.spec --noconfirm --clean
 
 if %ERRORLEVEL% neq 0 (
     echo [-] Build failed. Check the error output above.
@@ -94,16 +94,16 @@ echo.
 echo ==========================================================
 echo                   Build Successful!
 echo ==========================================================
-if exist "dist\ArcVault.exe" (
-    for %%F in ("dist\ArcVault.exe") do set "SIZE=%%~zF bytes"
-    echo [OK] Standalone Portable Executable: dist\ArcVault.exe (!SIZE!)
+if exist "dist\Vaultables.exe" (
+    for %%F in ("dist\Vaultables.exe") do set "SIZE=%%~zF bytes"
+    echo [OK] Standalone Portable Executable: dist\Vaultables.exe (!SIZE!)
     echo.
     echo Portable Deployment Tip:
-    echo   You can copy 'dist\ArcVault.exe' to any folder or USB drive.
+    echo   You can copy 'dist\Vaultables.exe' to any folder or USB drive.
     echo   If 7-Zip is not installed globally on the target machine,
-    echo   simply copy '7z.exe' and '7z.dll' next to 'ArcVault.exe'.
+    echo   simply copy '7z.exe' and '7z.dll' next to 'Vaultables.exe'.
 ) else (
-    echo [!] Warning: dist\ArcVault.exe not found.
+    echo [!] Warning: dist\Vaultables.exe not found.
 )
 echo ==========================================================
 echo.

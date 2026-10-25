@@ -1,4 +1,4 @@
-"""About ArcVault dialog displaying version, contributors, and open source credits."""
+"""About Vaultables dialog displaying version, contributors, and open source credits."""
 
 from __future__ import annotations
 
@@ -15,17 +15,17 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.gui.icons import IconProvider
+from vaultables.gui.icons import IconProvider
 
 
 class AboutDialog(QDialog):
-    """Modern modal dialog presenting ArcVault information, contributors, and special thanks."""
+    """Modern modal dialog presenting Vaultables information, contributors, and special thanks."""
 
     def __init__(self, parent: Optional[QWidget] = None, dark_mode: bool = True) -> None:
         super().__init__(parent)
         self.dark_mode = dark_mode
 
-        self.setWindowTitle("About ArcVault")
+        self.setWindowTitle("About Vaultables")
         self.setFixedSize(520, 560)
         self.setModal(True)
 
@@ -42,7 +42,7 @@ class AboutDialog(QDialog):
         header.addWidget(icon_lbl)
 
         title_layout = QVBoxLayout()
-        title_lbl = QLabel("ArcVault", self)
+        title_lbl = QLabel("Vaultables", self)
         title_lbl.setStyleSheet("font-size: 20px; font-weight: 800; letter-spacing: -0.5px;")
 
         ver_lbl = QLabel("Version 2.0 • Chunked Decoupled Architecture", self)
@@ -94,7 +94,7 @@ class AboutDialog(QDialog):
         scroll_layout.addWidget(thanks_lbl)
 
         thanks_desc = QLabel(
-            "ArcVault stands on the shoulders of giants. Sincere gratitude to the creators and maintainers of these foundational open source projects:",
+            "Vaultables stands on the shoulders of giants. Sincere gratitude to the creators and maintainers of these foundational open source projects:",
             scroll_content,
         )
         thanks_desc.setStyleSheet("font-size: 11px; color: #94a3b8;" if self.dark_mode else "font-size: 11px; color: #64748b;")
@@ -104,7 +104,7 @@ class AboutDialog(QDialog):
         credits_html = """
         <div style="line-height: 1.45; font-size: 11px;">
         <p>• <b>7-Zip by Igor Pavlov</b><br>
-        <span style="color: {muted};">The core archival and cryptographic engine behind ArcVault, providing rock-solid AES-256 header and data encryption (-mx=0, -mhe=on), instant SSD throughput, and universal vendor independence.</span></p>
+        <span style="color: {muted};">The core archival and cryptographic engine behind Vaultables, providing rock-solid AES-256 header and data encryption (-mx=0, -mhe=on), instant SSD throughput, and universal vendor independence.</span></p>
 
         <p>• <b>PyQt6 (Riverbank Computing & The Qt Company)</b><br>
         <span style="color: {muted};">The world-class desktop application framework providing the sleek user interface, high-DPI Retina vector rendering, and responsive multi-threading worker pipeline.</span></p>

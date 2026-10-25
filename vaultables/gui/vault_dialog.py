@@ -21,9 +21,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.core.vault import Vault, VaultExistsError
-from arc_vault.gui.icons import IconProvider
-from arc_vault.gui.workers import UnlockWorker
+from vaultables.core.vault import Vault, VaultExistsError
+from vaultables.gui.icons import IconProvider
+from vaultables.gui.workers import UnlockWorker
 
 
 class UnlockVaultDialog(QDialog):
@@ -242,17 +242,17 @@ class CreateVaultDialog(QDialog):
         layout.addLayout(categories_layout)
 
         # Obfuscation Option
-        self.chk_obfuscate = QCheckBox("Obfuscate folder & file names in arc-data", self)
+        self.chk_obfuscate = QCheckBox("Obfuscate folder & file names in vaultables-data", self)
         self.chk_obfuscate.setChecked(True)
         self.chk_obfuscate.setStyleSheet("font-size: 12px; font-weight: 500; margin-top: 6px;")
         self.chk_obfuscate.setToolTip(
-            "When enabled (recommended), directory and file names inside arc-data/ are disguised with random IDs.\n"
+            "When enabled (recommended), directory and file names inside vaultables-data/ are disguised with random IDs.\n"
             "When disabled, plain human-readable names are preserved on disk."
         )
         layout.addWidget(self.chk_obfuscate)
 
         lbl_obf_hint = QLabel(
-            "Disguises directory and item names in arc-data/ with random IDs for extra privacy.", self
+            "Disguises directory and item names in vaultables-data/ with random IDs for extra privacy.", self
         )
         lbl_obf_hint.setStyleSheet("color: #64748b; font-size: 11px; margin-left: 20px; margin-bottom: 4px;")
         layout.addWidget(lbl_obf_hint)
@@ -350,3 +350,119 @@ class CreateVaultDialog(QDialog):
     def _show_error(self, msg: str) -> None:
         self.lbl_error.setText(msg)
         self.lbl_error.setVisible(True)
+
+class CreateEntryPointDialog(QDialog):
+    """Dialog to create a new entry point with on-demand obfuscation options."""
+
+    def __init__(
+        self,
+        vault_is_obfuscated: bool = True,
+        parent: Optional[QWidget] = None,
+        dark_mode: bool = True,
+    ) -> None:
+        super().__init__(parent)
+        self.vault_is_obfuscated = vault_is_obfuscated
+        self.dark_mode = dark_mode
+
+        self.setWindowTitle("New Entry Point")
+        self.setFixedSize(480, 260)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        # Header with Entry Point icon
+        header = QHBoxLayout()
+        icon_lbl = QLabel(self)
+        icon_lbl.setPixmap(IconProvider.get_pixmap("entry_point", dark_mode=self.dark_mode, size=32))
+        header.addWidget(icon_lbl)
+
+        title_layout = QVBoxLayout()
+        title_lbl = QLabel("New Entry Point (.7z)", self)
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold;")
+        sub_lbl = QLabel("Create a new virtual category archive in this vault.", self)
+        sub_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        title_layout.addWidget(title_lbl)
+        title_layout.addWidget(sub_lbl)
+        header.addLayout(title_layout)
+        header.addStretch()
+        layout.addLayout(header)
+
+        # Form fields
+        form = QFormLayout()
+        form.setSpacing(8)
+        self.edit_name = QLineEdit(self)
+        self.edit_name.setPlaceholderText("e.g. photos, documents, work")
+        self.edit_name.returnPressed.connect(self._on_accept)
+        form.addRow("Category Name:", self.edit_name)
+        layout.addLayout(form)
+
+        # On-Demand Obfuscation Checkbox & Helper Text
+        self.chk_obfuscation_override = QCheckBox(self)
+        if self.vault_is_obfuscated:
+            self.chk_obfuscation_override.setText("Obfuscated vault, but this entry point is easily readable")
+            helper_text = (
+                "When checked, files in this specific entry point will use clean, human-readable "
+                "folder & file names on disk under vaultables-data/ instead of randomized IDs."
+            )
+        else:
+            self.chk_obfuscation_override.setText("Unobfuscated vault, but this entry point has names randomized")
+            helper_text = (
+                "When checked, files in this specific entry point will be disguised under "
+                "vaultables-data/ with randomized 12-character privacy IDs."
+            )
+
+        self.chk_obfuscation_override.setChecked(False)
+        self.chk_obfuscation_override.setStyleSheet("font-size: 12px; font-weight: 500; margin-top: 4px;")
+        layout.addWidget(self.chk_obfuscation_override)
+
+        self.lbl_helper = QLabel(helper_text, self)
+        self.lbl_helper.setStyleSheet("color: #64748b; font-size: 11px; margin-left: 20px;")
+        self.lbl_helper.setWordWrap(True)
+        layout.addWidget(self.lbl_helper)
+
+        # Status / Error banner
+        self.lbl_error = QLabel("", self)
+        self.lbl_error.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self.lbl_error.setVisible(False)
+        layout.addWidget(self.lbl_error)
+
+        layout.addStretch()
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_create = QPushButton("Create Entry Point", self)
+        self.btn_create.setProperty("class", "primary")
+        self.btn_create.clicked.connect(self._on_accept)
+        btn_layout.addWidget(self.btn_create)
+
+        layout.addLayout(btn_layout)
+
+        self.edit_name.setFocus()
+
+    def _on_accept(self) -> None:
+        name = self.edit_name.text().strip().replace(".7z", "")
+        if not name:
+            self.lbl_error.setText("Please enter an entry point category name.")
+            self.lbl_error.setVisible(True)
+            self.edit_name.setFocus()
+            return
+        self.accept()
+
+    def get_entry_point_name(self) -> str:
+        return self.edit_name.text().strip().replace(".7z", "")
+
+    def get_obfuscate_setting(self) -> bool:
+        override = self.chk_obfuscation_override.isChecked()
+        if self.vault_is_obfuscated:
+            return not override
+        else:
+            return override
+

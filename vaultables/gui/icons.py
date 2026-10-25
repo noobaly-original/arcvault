@@ -1,4 +1,4 @@
-"""SVG-based vector icon provider with crisp Retina high-DPI scaling for ArcVault."""
+"""SVG-based vector icon provider with crisp Retina high-DPI scaling for Vaultables."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from PyQt6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QApplication
 
-from arc_vault.core.models import FileCategory
+from vaultables.core.models import FileCategory
 
 
 # Clean, modern SVG icon templates (Lucide / Feather inspired)

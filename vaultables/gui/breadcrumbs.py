@@ -1,4 +1,4 @@
-"""Interactive breadcrumb navigation bar for ArcVault."""
+"""Interactive breadcrumb navigation bar for Vaultables."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.gui.icons import IconProvider
+from vaultables.gui.icons import IconProvider
 
 
 class BreadcrumbBar(QWidget):

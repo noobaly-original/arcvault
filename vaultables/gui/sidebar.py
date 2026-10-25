@@ -25,9 +25,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from arc_vault.config import AppConfig
-from arc_vault.core.vault import Vault
-from arc_vault.gui.icons import IconProvider
+from vaultables.config import AppConfig
+from vaultables.core.vault import Vault
+from vaultables.gui.icons import IconProvider
 
 
 class DropListWidget(QListWidget):
@@ -106,7 +106,7 @@ class VaultSidebar(QWidget):
         self.brand_icon.setPixmap(IconProvider.get_pixmap("vault", dark_mode=self.dark_mode, size=24))
         brand_layout.addWidget(self.brand_icon)
 
-        self.brand_title = QLabel("ArcVault", self)
+        self.brand_title = QLabel("Vaultables", self)
         self.brand_title.setStyleSheet("font-size: 15px; font-weight: bold; letter-spacing: 0.5px;")
         brand_layout.addWidget(self.brand_title)
         brand_layout.addStretch()
@@ -269,7 +269,9 @@ class VaultSidebar(QWidget):
             item = QListWidgetItem(f"{ep_name}.7z")
             item.setIcon(IconProvider.get_icon("entry_point", dark_mode=self.dark_mode, size=18))
             item.setData(Qt.ItemDataRole.UserRole, ep_name)
-            item.setToolTip(f"Archive: {ep.archive_file.name}")
+            is_obf = self.current_vault.is_entry_point_obfuscated(ep_name)
+            mode_desc = "Obfuscated (random IDs)" if is_obf else "Readable names"
+            item.setToolTip(f"Archive: {ep.archive_file.name} | Storage: {mode_desc}")
             self.ep_list.addItem(item)
             if self.active_entry_point == ep_name:
                 selected_row = idx
@@ -389,4 +391,4 @@ class VaultSidebar(QWidget):
             else:
                 subprocess.Popen(["xdg-open", str(path.parent)])
         except Exception as e:
-            print(f"[ArcVault] Failed to reveal path: {e}")
+            print(f"[Vaultables] Failed to reveal path: {e}")

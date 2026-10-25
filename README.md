@@ -1,10 +1,10 @@
-# 🛡️ ArcVault
+# 🛡️ Vaultables
 
-**ArcVault** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
+**Vaultables** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
 
-Unlike traditional vault systems (such as Cryptomator) that rely on complex virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **ArcVault** takes a clean, file-centric approach:
+Unlike traditional vault systems (such as Cryptomator) that rely on complex virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **Vaultables** takes a clean, file-centric approach:
 - Your vault is simply a standard folder on your disk or cloud sync folder (Google Drive, MEGA, Dropbox, OneDrive).
-- The vault uses a **decoupled, chunked storage architecture (V2)** where virtual folder entry points house encrypted metadata, while file contents are stored in uncompressed, store-mode AES-256 encrypted chunks under `arc-data/`.
+- The vault uses a **decoupled, chunked storage architecture (V2)** where virtual folder entry points house encrypted metadata, while file contents are stored in uncompressed, store-mode AES-256 encrypted chunks under `vaultables-data/`.
 - **Zero Re-Archiving Overhead**: Adding or deleting a file never rewrites existing archive contents.
 - **Complete Vendor Freedom**: All encrypted chunks are standard 7-Zip archives with AES-256 header encryption (`-mhe=on`). You can inspect or extract any chunk directly using **7-Zip, NanaZip, Keka, or PeaZip** on Windows, macOS, or Linux!
 - **Portable & Standalone**: Available as a single portable "onefile" executable across macOS, Windows, and Linux that runs out of the box without complex installers.
@@ -14,21 +14,21 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 ## ✨ Features
 
 - **Portable Onefile Executables & USB Mode**:
-  - Run ArcVault as a single, self-contained portable executable on **Windows** (`ArcVault.exe`), **Linux** (`ArcVault`), and **macOS** (`ArcVault` & `ArcVault.app`).
-  - **USB Drive Portable**: If 7-Zip is not installed system-wide on the host computer, simply drop `7z.exe` / `7zz` in the same directory as ArcVault, and the app detects it automatically.
+  - Run Vaultables as a single, self-contained portable executable on **Windows** (`Vaultables.exe`), **Linux** (`Vaultables`), and **macOS** (`Vaultables` & `Vaultables.app`).
+  - **USB Drive Portable**: If 7-Zip is not installed system-wide on the host computer, simply drop `7z.exe` / `7zz` in the same directory as Vaultables, and the app detects it automatically.
 - **Off-Site File Importer (`import/` ➔ `imports`)**:
-  - **File Liberation on Mobile & Remote Devices**: Import files without needing ArcVault installed (iPhone, iPad, Android, or secondary PCs).
+  - **File Liberation on Mobile & Remote Devices**: Import files without needing Vaultables installed (iPhone, iPad, Android, or secondary PCs).
   - **Drop-Folder Workflow**: Compress files or folders into a standard `.7z` archive using your vault's master password (via mobile apps like Keka or iZip, or 7-Zip, NanaZip, PeaZip) and drop them into the vault's `import/` folder (via iCloud, Google Drive, Nextcloud, Dropbox, AirDrop, or USB).
-  - **Automatic Ingestion**: ArcVault tests password integrity, extracts files to an isolated scratchpad, re-encrypts them into native chunked storage, and incorporates them into a dedicated `imports` virtual entry point (`imports.7z`).
-  - **Strict Obfuscation Adherence**: Respects your vault's obfuscation settings—assigning random 12-character privacy IDs in obfuscated mode, or preserving clean human-readable paths (`arc-data/imports/...`) in unobfuscated mode.
+  - **Automatic Ingestion**: Vaultables tests password integrity, extracts files to an isolated scratchpad, re-encrypts them into native chunked storage, and incorporates them into a dedicated `imports` virtual entry point (`imports.7z`).
+  - **Strict Obfuscation Adherence**: Respects your vault's obfuscation settings—assigning random 12-character privacy IDs in obfuscated mode, or preserving clean human-readable paths (`vaultables-data/imports/...`) in unobfuscated mode.
   - **Safe Cleanup**: Processed `.7z` archives and any containing subfolders inside `import/` are safely deleted upon successful ingestion, leaving only `import/README.txt` and preventing redundant re-imports.
   - **Zero-Footprint Staging**: Scratch files extracted during staging are wiped immediately from disk and memory.
 - **Configurable Name Obfuscation**:
-  - Choose during vault creation whether folder and file names in `arc-data/` are disguised with random alphanumeric IDs (default, maximum privacy) or kept as plain human-readable names on disk for users who prefer directly readable encrypted folder trees.
+  - Choose during vault creation whether folder and file names in `vaultables-data/` are disguised with random alphanumeric IDs (default, maximum privacy) or kept as plain human-readable names on disk for users who prefer directly readable encrypted folder trees.
 - **Blazing Fast Store-Mode Encryption**: Bypasses CPU-heavy compression (`-mx=0`) while enforcing maximum AES-256 header and data encryption (`-mhe=on`), achieving native SSD throughput (500+ MB/s).
-- **Decoupled Virtual Entry Points & `arc-data/`**:
+- **Decoupled Virtual Entry Points & `vaultables-data/`**:
   - Top-level archives (`photos.7z`, `documents.7z`, `imports.7z`) act as **virtual folders** holding lightweight AES-256 encrypted metadata.
-  - Actual contents are organized under `arc-data/{random_ep_id}/{random_item_id}/`.
+  - Actual contents are organized under `vaultables-data/{random_ep_id}/{random_item_id}/`.
   - Adding or deleting an item updates only that item's directory and a ~1 KB metadata archive, taking milliseconds instead of minutes.
   - Moving and renaming files or folders are instant metadata operations with zero disk re-writing.
 - **Large File 1 GB Chunk Shredding**:
@@ -40,7 +40,7 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
   - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
   - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
 - **Vault Nesting Safeguards**:
-  - ArcVault actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.arcvault`) from active vault stores.\n- **Deep Recursive Multi-Archive Search**:
+  - Vaultables actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.vaultables`) from active vault stores.\n- **Deep Recursive Multi-Archive Search**:
   - Search across all virtual entry points and nested subfolders simultaneously in milliseconds.
   - Flexible scope selection: **Entire Vault (Recursive)**, **Current Archive (Recursive)**, or **Current Folder**.
   - Supports wildcard patterns (`*.png`, `*report*`, `invoice_??.pdf`) and substring text matching.
@@ -52,11 +52,11 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
   - New minimalist vector app icon adhering to modern Apple Human Interface Guidelines.
 - **Fast & Reliable In-App & External Editing**:
   - **In-App Direct Editing**: Edit text, notes, JSON, and code files directly in the preview panel with `Save` (Ctrl+S / Cmd+S).
-  - **External Editor Auto-Sync**: Right-click any file and select *Edit with Default App*. ArcVault extracts the file to a secure staging area watched with `QFileSystemWatcher`. Saving in your external editor (VS Code, TextEdit, Notepad) immediately updates the encrypted vault.
+  - **External Editor Auto-Sync**: Right-click any file and select *Edit with Default App*. Vaultables extracts the file to a secure staging area watched with `QFileSystemWatcher`. Saving in your external editor (VS Code, TextEdit, Notepad) immediately updates the encrypted vault.
 - **Cross-Platform Drag-and-Drop**:
   - **Drop onto Folders**: Dragging external files from Finder / Explorer and dropping them directly onto a subfolder row in the table encrypts and adds them into that specific directory.
   - **Drop Folders**: Dragging entire folders adds the directory hierarchy into the vault.
-  - **Drag to Export**: Drag any file or selection from ArcVault out to your Desktop or Finder to automatically decrypt and export it.
+  - **Drag to Export**: Drag any file or selection from Vaultables out to your Desktop or Finder to automatically decrypt and export it.
 - **Rich Previews**:
   - **Text & Code**: Syntax-highlighted viewer (powered by Pygments) for Python, JavaScript, JSON, Markdown, HTML, CSS, C/C++, Rust, Shell scripts, etc.
   - **Images**: High-resolution image viewer with zoom controls, smooth scaling, and dimension badges (PNG, JPG, WebP, GIF, SVG, BMP, ICO).
@@ -78,12 +78,12 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - 7-Zip CLI (`7zz`, `7z`, or `nanazip`):
   - **macOS**: `brew install sevenzip`
   - **Linux**: `sudo apt install p7zip-full` or `sudo dnf install p7zip`
-  - **Windows**: Install 7-Zip or NanaZip (or place `7z.exe` next to `ArcVault.exe`).
+  - **Windows**: Install 7-Zip or NanaZip (or place `7z.exe` next to `Vaultables.exe`).
 
 ### 2. Installation
 ```bash
-git clone https://github.com/noobaly-original/arcvault.git
-cd arcvault
+git clone https://github.com/noobaly-original/vaultables.git
+cd vaultables
 
 # Using uv (recommended):
 uv venv .venv
@@ -96,7 +96,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Launching ArcVault
+### 3. Launching Vaultables
 ```bash
 python3 run.py
 ```
@@ -105,7 +105,7 @@ python3 run.py
 
 ## 📦 1-Click Build Scripts & Portable Standalone Executables
 
-ArcVault includes automated build scripts to generate single-file portable executables across all major operating systems:
+Vaultables includes automated build scripts to generate single-file portable executables across all major operating systems:
 
 ### 🍎 macOS
 ```bash
@@ -113,8 +113,8 @@ chmod +x build_mac.sh
 ./build_mac.sh
 ```
 - **Outputs**:
-  - `dist/ArcVault` — Standalone portable onefile binary.
-  - `dist/ArcVault.app` — Native macOS Application Bundle.
+  - `dist/Vaultables` — Standalone portable onefile binary.
+  - `dist/Vaultables.app` — Native macOS Application Bundle.
 
 ### 🪟 Windows
 In Command Prompt:
@@ -125,14 +125,14 @@ Or in PowerShell:
 ```powershell
 .\build_windows.ps1
 ```
-- **Output**: `dist\ArcVault.exe` — Single portable executable file.
+- **Output**: `dist\Vaultables.exe` — Single portable executable file.
 
 ### 🐧 Linux
 ```bash
 chmod +x build_linux.sh
 ./build_linux.sh
 ```
-- **Output**: `dist/ArcVault` — Standalone portable ELF binary.
+- **Output**: `dist/Vaultables` — Standalone portable ELF binary.
 
 *(For detailed packaging options, manual PyInstaller commands, and icon generation, see [**`BUILD.md`**](BUILD.md).)*
 
@@ -140,18 +140,18 @@ chmod +x build_linux.sh
 
 ## 📁 Vault Structure Explained
 
-When ArcVault creates a vault named `MyVault`, the filesystem structure looks like this:
+When Vaultables creates a vault named `MyVault`, the filesystem structure looks like this:
 
 ```text
 MyVault/
-├── .arcvault                       # Vault metadata descriptor (ID, name, version)
+├── .vaultables                       # Vault metadata descriptor (ID, name, version)
 ├── .vault_check.7z                 # Fast password verification canary
 ├── import/                         # Drop-folder for off-site .7z mobile/remote imports
 │   └── README.txt                 # Step-by-step instructions for off-site importing
 ├── imports.7z                      # Virtual Entry Point: Created automatically for imported files
 ├── photos.7z                       # Virtual Entry Point: Encrypted metadata.json
 ├── documents.7z                    # Virtual Entry Point: Encrypted metadata.json
-└── arc-data/                       # Store-mode AES-256 encrypted payload
+└── vaultables-data/                       # Store-mode AES-256 encrypted payload
     ├── K9mB3vXp8Q1L/              # Entry point data directory (random ID when obfuscated, or "photos" if plain)
     │   ├── a1b2c3d4e5f6/          # Item folder for "vacation.jpg" (random ID when obfuscated, or "vacation.jpg" if plain)
     │   │   └── chunk_000.7z       # AES-256 store-mode chunk (-mx=0, -mhe=on)
@@ -162,11 +162,11 @@ MyVault/
     └── Z7y4W1v2U9t0/              # Entry point data directory for 'documents'
 ```
 
-> **Note on Name Obfuscation**: When creating a vault, you can toggle **Obfuscate folder & file names in arc-data**.
-> - **Enabled (Default)**: Folders in `arc-data/` use random 12-character alphanumeric IDs (`K9mB3vXp8Q1L`), preventing anyone inspecting the raw storage from discovering your folder or file names.
-> - **Disabled**: Entry points and item folders in `arc-data/` retain their exact human-readable names (`photos/vacation.jpg/chunk_000.7z`), allowing you to easily browse the folder structure on disk while keeping all contents strictly AES-256 encrypted.
+> **Note on Name Obfuscation**: When creating a vault, you can toggle **Obfuscate folder & file names in vaultables-data**.
+> - **Enabled (Default)**: Folders in `vaultables-data/` use random 12-character alphanumeric IDs (`K9mB3vXp8Q1L`), preventing anyone inspecting the raw storage from discovering your folder or file names.
+> - **Disabled**: Entry points and item folders in `vaultables-data/` retain their exact human-readable names (`photos/vacation.jpg/chunk_000.7z`), allowing you to easily browse the folder structure on disk while keeping all contents strictly AES-256 encrypted.
 
-- When viewing `photos` or `imports` inside ArcVault, the application projects the virtual items seamlessly as single unified files and directories.
+- When viewing `photos` or `imports` inside Vaultables, the application projects the virtual items seamlessly as single unified files and directories.
 - `metadata.json` is automatically hidden from the user view.
 - Legacy V1 monolithic archives are automatically migrated to V2 chunked format upon opening.
 
@@ -200,9 +200,9 @@ The test suite covers backend encryption, V2 chunking/shredding, atomic swapping
 
 ## 🙏 Special Thanks & Open Source Credits
 
-ArcVault stands on the shoulders of giants. Special thanks and sincere gratitude to the authors and maintainers of the open-source libraries and utilities that make ArcVault possible:
+Vaultables stands on the shoulders of giants. Special thanks and sincere gratitude to the authors and maintainers of the open-source libraries and utilities that make Vaultables possible:
 
-- **[7-Zip](https://www.7-zip.org/) by Igor Pavlov** — The foundational archival and cryptographic engine behind ArcVault. Igor Pavlov's extraordinary work on 7-Zip provides the rock-solid store-mode AES-256 header and payload encryption (`-mx=0`, `-mhe=on`) that powers ArcVault's lightning-fast SSD throughput and universal vendor independence.
+- **[7-Zip](https://www.7-zip.org/) by Igor Pavlov** — The foundational archival and cryptographic engine behind Vaultables. Igor Pavlov's extraordinary work on 7-Zip provides the rock-solid store-mode AES-256 header and payload encryption (`-mx=0`, `-mhe=on`) that powers Vaultables's lightning-fast SSD throughput and universal vendor independence.
 - **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/) (Riverbank Computing & The Qt Company)** — The world-class desktop application framework providing the sleek modern UI, high-DPI Retina vector graphics, multi-threaded background workers, and cross-platform native feel.
 - **[Pygments](https://pygments.org/) by Georg Brandl & the Python Community** — The robust syntax-highlighting engine driving in-app code and text file previews across hundreds of programming and markup languages.
-- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.\n- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle ArcVault into standalone, portable native binaries across macOS, Windows, and Linux.
+- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.\n- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle Vaultables into standalone, portable native binaries across macOS, Windows, and Linux.

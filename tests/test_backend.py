@@ -1,4 +1,4 @@
-"""Unit tests for ArcVault core logic, 7z encryption, and vault management."""
+"""Unit tests for Vaultables core logic, 7z encryption, and vault management."""
 
 import json
 import shutil
@@ -6,15 +6,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from arc_vault.core.models import FileCategory, classify_file
-from arc_vault.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError, SevenZipOperationError
-from arc_vault.core.vault import Vault, VaultUnlockError
+from vaultables.core.models import FileCategory, classify_file
+from vaultables.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError, SevenZipOperationError
+from vaultables.core.vault import Vault, VaultUnlockError
 
 
-class TestArcVaultBackend(unittest.TestCase):
+class TestVaultablesBackend(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.tmp_dir = tempfile.mkdtemp(prefix="arcvault_test_")
+        self.tmp_dir = tempfile.mkdtemp(prefix="vaultables_test_")
         self.root_path = Path(self.tmp_dir)
         self.sz = SevenZip()
         self.password = "MySecureTestPass123!"
@@ -80,7 +80,7 @@ class TestArcVaultBackend(unittest.TestCase):
         )
 
         sample1 = self.root_path / "sample1.txt"
-        sample1.write_text("Hello ArcVault Text!", encoding="utf-8")
+        sample1.write_text("Hello Vaultables Text!", encoding="utf-8")
 
         sample_img = self.root_path / "picture.png"
         sample_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR...")
@@ -108,7 +108,7 @@ class TestArcVaultBackend(unittest.TestCase):
         preview_path = vault.extract_file_for_preview("photos", "sample1.txt")
         self.assertIsNotNone(preview_path)
         self.assertTrue(preview_path.exists())
-        self.assertEqual(preview_path.read_text(encoding="utf-8"), "Hello ArcVault Text!")
+        self.assertEqual(preview_path.read_text(encoding="utf-8"), "Hello Vaultables Text!")
 
         export_dest = self.root_path / "exported"
         ok_exp = vault.export_items("photos", ["sample1.txt"], export_dest)
@@ -275,7 +275,7 @@ class TestArcVaultBackend(unittest.TestCase):
         # 2. Add to entry point
         self.assertTrue(vault.add_files("storage", [test_file]))
 
-        # 3. Check arc-data directory structure
+        # 3. Check vaultables-data directory structure
         meta = vault._v2_metadata["storage"]
         ep_dir = vault.arc_data_dir / meta.ep_dir_id
         self.assertTrue(ep_dir.exists())
@@ -294,7 +294,7 @@ class TestArcVaultBackend(unittest.TestCase):
         item_names = [i.name for i in items]
         self.assertIn("big_video.mp4", item_names)
         self.assertNotIn("metadata.json", item_names)  # Metadata must never be rendered!
-        self.assertNotIn(".arcvault_init", item_names)
+        self.assertNotIn(".vaultables_init", item_names)
 
         proj_item = next(i for i in items if i.name == "big_video.mp4")
         self.assertEqual(proj_item.size, total_len)
@@ -352,7 +352,7 @@ class TestArcVaultBackend(unittest.TestCase):
 
     def test_unique_random_folder_generation_collision_avoidance(self) -> None:
         """Verify generate_unique_folder_id skips existing folders and regenerates unique names."""
-        from arc_vault.core.storage_v2 import generate_unique_folder_id
+        from vaultables.core.storage_v2 import generate_unique_folder_id
 
         test_dir = self.root_path / "collision_test"
         test_dir.mkdir()
@@ -477,7 +477,7 @@ class TestArcVaultBackend(unittest.TestCase):
 
 
     def test_vault_obfuscation_option_disabled(self) -> None:
-        """Verify vault created with obfuscate_names=False preserves human-readable entry points, folders, and files in arc-data."""
+        """Verify vault created with obfuscate_names=False preserves human-readable entry points, folders, and files in vaultables-data."""
         vault_dir = self.root_path / "plain_vault"
         vault = Vault.create_vault(
             vault_dir,
@@ -491,7 +491,7 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertFalse(vault.obfuscate_names)
         self.assertFalse(vault.metadata.obfuscate_names)
 
-        # 1. Entry point folder under arc-data should be "documents" (not random 12-char ID)
+        # 1. Entry point folder under vaultables-data should be "documents" (not random 12-char ID)
         meta = vault._v2_metadata["documents"]
         self.assertEqual(meta.ep_dir_id, "documents")
         ep_data_dir = vault.arc_data_dir / "documents"
@@ -502,7 +502,7 @@ class TestArcVaultBackend(unittest.TestCase):
         f1.write_text("plain notes", encoding="utf-8")
         vault.add_files("documents", [f1])
 
-        # File chunk should be under arc-data/documents/notes.txt/chunk_000.7z
+        # File chunk should be under vaultables-data/documents/notes.txt/chunk_000.7z
         self.assertEqual(meta.items["notes.txt"].item_id, "notes.txt")
         self.assertTrue((ep_data_dir / "notes.txt" / "chunk_000.7z").is_file())
 
@@ -564,7 +564,7 @@ class TestArcVaultBackend(unittest.TestCase):
 
     def test_cannot_create_vault_inside_existing_vault(self) -> None:
         """Verify creating a vault inside or at an existing vault directory raises VaultExistsError."""
-        from arc_vault.core.vault import VaultExistsError
+        from vaultables.core.vault import VaultExistsError
 
         vault_dir = self.root_path / "first_vault"
         vault = Vault.create_vault(
@@ -597,8 +597,8 @@ class TestArcVaultBackend(unittest.TestCase):
             )
         self.assertIn("located inside an existing vault folder", str(ctx2.exception))
 
-        # 3. Attempting to create inside arc-data raises VaultExistsError
-        arc_data_sub = vault_dir / "arc-data" / "rogue_vault"
+        # 3. Attempting to create inside vaultables-data raises VaultExistsError
+        arc_data_sub = vault_dir / "vaultables-data" / "rogue_vault"
         with self.assertRaises(VaultExistsError) as ctx3:
             Vault.create_vault(
                 arc_data_sub,
@@ -609,11 +609,11 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertIn("located inside an existing vault folder", str(ctx3.exception))
 
     def test_home_config_directory_not_mistaken_for_vault(self) -> None:
-        """Verify a directory with a .arcvault subdirectory (like ~/.arcvault) is not mistaken for a vault."""
+        """Verify a directory with a .vaultables subdirectory (like ~/.vaultables) is not mistaken for a vault."""
         mock_home = self.root_path / "mock_user_home"
         mock_home.mkdir(parents=True, exist_ok=True)
-        # Simulate ~/.arcvault configuration folder
-        cfg_dir = mock_home / ".arcvault"
+        # Simulate ~/.vaultables configuration folder
+        cfg_dir = mock_home / ".vaultables"
         cfg_dir.mkdir()
         (cfg_dir / "config.json").write_text('{"theme": "dark"}', encoding="utf-8")
 
@@ -648,7 +648,7 @@ class TestArcVaultBackend(unittest.TestCase):
         vault.set_display_name("Custom Secret Vault")
         self.assertEqual(vault.name, "Custom Secret Vault")
 
-        # Verify persisted to .arcvault on disk
+        # Verify persisted to .vaultables on disk
         marker_data = json.loads((vault_dir / Vault.MARKER_FILENAME).read_text(encoding="utf-8"))
         self.assertEqual(marker_data.get("name"), "Custom Secret Vault")
 
@@ -792,10 +792,94 @@ class TestArcVaultBackend(unittest.TestCase):
         plain_count = plain_vault.process_pending_imports()
         self.assertEqual(plain_count, 1)
         self.assertFalse(plain_7z.exists())
-        # In unobfuscated vault, arc-data/imports/plain_doc.txt/chunk_000.7z must exist directly
+        # In unobfuscated vault, vaultables-data/imports/plain_doc.txt/chunk_000.7z must exist directly
         plain_meta = plain_vault._v2_metadata["imports"]
         self.assertEqual(plain_meta.ep_dir_id, "imports")
         self.assertTrue((plain_vault.arc_data_dir / "imports" / "plain_doc.txt" / "chunk_000.7z").is_file())
 
+
+    def test_on_demand_obfuscation(self) -> None:
+        """
+        Verify on-demand obfuscation override when creating entry points:
+        - Obfuscated vault: override to make entry point easily readable (plain names).
+        - Unobfuscated vault: override to make entry point names randomized (obfuscated).
+        """
+        test_file = self.root_path / "ondemand_sample.txt"
+        test_file.write_text("on demand obfuscation test content", encoding="utf-8")
+
+        # 1. Obfuscated Vault
+        obf_vault_dir = self.root_path / "ondemand_obf_vault"
+        obf_vault = Vault.create_vault(
+            obf_vault_dir,
+            name="OnDemand Obf Vault",
+            password=self.password,
+            sevenzip=self.sz,
+            obfuscate_names=True,
+        )
+        self.assertTrue(obf_vault.obfuscate_names)
+
+        # Default entry point (inherits True)
+        obf_vault.create_entry_point("default_ep")
+        self.assertTrue(obf_vault.is_entry_point_obfuscated("default_ep"))
+        meta_default = obf_vault._v2_metadata["default_ep"]
+        self.assertNotEqual(meta_default.ep_dir_id, "default_ep")
+        self.assertTrue(meta_default.is_obfuscated(obf_vault.obfuscate_names))
+
+        # On-demand readable entry point in obfuscated vault (obfuscate=False)
+        obf_vault.create_entry_point("readable_ep", obfuscate=False)
+        self.assertFalse(obf_vault.is_entry_point_obfuscated("readable_ep"))
+        meta_readable = obf_vault._v2_metadata["readable_ep"]
+        self.assertEqual(meta_readable.ep_dir_id, "readable_ep")
+        self.assertFalse(meta_readable.is_obfuscated(obf_vault.obfuscate_names))
+        self.assertFalse(meta_readable.obfuscate_names)
+
+        # Add file to readable_ep and verify human-readable path under vaultables-data/
+        obf_vault.add_files("readable_ep", [test_file])
+        expected_chunk = obf_vault.arc_data_dir / "readable_ep" / "ondemand_sample.txt" / "chunk_000.7z"
+        self.assertTrue(expected_chunk.is_file())
+
+        # Test subfolder in readable_ep
+        obf_vault.create_subfolder("readable_ep", "", "subdocs")
+        self.assertTrue((obf_vault.arc_data_dir / "readable_ep" / "subdocs").is_dir())
+
+        # Rename file in readable_ep
+        obf_vault.rename_item("readable_ep", "ondemand_sample.txt", "renamed_sample.txt")
+        renamed_chunk = obf_vault.arc_data_dir / "readable_ep" / "renamed_sample.txt" / "chunk_000.7z"
+        self.assertTrue(renamed_chunk.is_file())
+        self.assertFalse(expected_chunk.exists())
+
+        # 2. Unobfuscated Vault
+        plain_vault_dir = self.root_path / "ondemand_plain_vault"
+        plain_vault = Vault.create_vault(
+            plain_vault_dir,
+            name="OnDemand Plain Vault",
+            password=self.password,
+            sevenzip=self.sz,
+            obfuscate_names=False,
+        )
+        self.assertFalse(plain_vault.obfuscate_names)
+
+        # Default entry point (inherits False)
+        plain_vault.create_entry_point("default_plain_ep")
+        self.assertFalse(plain_vault.is_entry_point_obfuscated("default_plain_ep"))
+        meta_plain = plain_vault._v2_metadata["default_plain_ep"]
+        self.assertEqual(meta_plain.ep_dir_id, "default_plain_ep")
+
+        # On-demand obfuscated entry point in unobfuscated vault (obfuscate=True)
+        plain_vault.create_entry_point("secret_ep", obfuscate=True)
+        self.assertTrue(plain_vault.is_entry_point_obfuscated("secret_ep"))
+        meta_secret = plain_vault._v2_metadata["secret_ep"]
+        self.assertNotEqual(meta_secret.ep_dir_id, "secret_ep")
+        self.assertTrue(meta_secret.is_obfuscated(plain_vault.obfuscate_names))
+        self.assertTrue(meta_secret.obfuscate_names)
+
+        # Add file to secret_ep and verify randomized path under vaultables-data/
+        plain_vault.add_files("secret_ep", [test_file])
+        item_meta = meta_secret.items["ondemand_sample.txt"]
+        self.assertNotEqual(item_meta.item_id, "ondemand_sample.txt")
+        self.assertTrue((plain_vault.arc_data_dir / meta_secret.ep_dir_id / item_meta.item_id / "chunk_000.7z").is_file())
+        self.assertFalse((plain_vault.arc_data_dir / "secret_ep").exists())
+
 if __name__ == "__main__":
+
     unittest.main()

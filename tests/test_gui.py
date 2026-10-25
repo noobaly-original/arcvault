@@ -1,4 +1,4 @@
-"""Headless GUI tests for ArcVault components."""
+"""Headless GUI tests for Vaultables components."""
 
 import os
 import shutil
@@ -15,21 +15,21 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QHeaderView, QLabel
 
-from arc_vault.config import AppConfig
-from arc_vault.core.models import ArchiveItem, FileCategory
-from arc_vault.core.vault import Vault
-from arc_vault.gui.breadcrumbs import BreadcrumbBar
-from arc_vault.gui.file_view import FileExplorerView
-from arc_vault.gui.icons import IconProvider
-from arc_vault.gui.logs_panel import LogsPanel
-from arc_vault.gui.main_window import MainWindow
-from arc_vault.gui.preview_panel import PreviewPanel
-from arc_vault.gui.sidebar import VaultSidebar
-from arc_vault.gui.theme import DARK_STYLESHEET, LIGHT_STYLESHEET, get_stylesheet
-from arc_vault.logger import clear_log_history, log_7zip, log_info
+from vaultables.config import AppConfig
+from vaultables.core.models import ArchiveItem, FileCategory
+from vaultables.core.vault import Vault
+from vaultables.gui.breadcrumbs import BreadcrumbBar
+from vaultables.gui.file_view import FileExplorerView
+from vaultables.gui.icons import IconProvider
+from vaultables.gui.logs_panel import LogsPanel
+from vaultables.gui.main_window import MainWindow
+from vaultables.gui.preview_panel import PreviewPanel
+from vaultables.gui.sidebar import VaultSidebar
+from vaultables.gui.theme import DARK_STYLESHEET, LIGHT_STYLESHEET, get_stylesheet
+from vaultables.logger import clear_log_history, log_7zip, log_info
 
 
-class TestArcVaultGUI(unittest.TestCase):
+class TestVaultablesGUI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -38,7 +38,7 @@ class TestArcVaultGUI(unittest.TestCase):
             cls.app = QApplication([])
 
     def setUp(self) -> None:
-        self.tmp_dir = tempfile.mkdtemp(prefix="arcvault_gui_test_")
+        self.tmp_dir = tempfile.mkdtemp(prefix="vaultables_gui_test_")
         self.root_path = Path(self.tmp_dir)
         self.config = AppConfig(config_file=self.root_path / "config.json")
         self.config.known_vaults = []
@@ -228,7 +228,7 @@ class TestArcVaultGUI(unittest.TestCase):
         fake_staged.write_text("hello", encoding="utf-8")
         win.vault.extract_file_for_editing.return_value = fake_staged
 
-        with patch("arc_vault.gui.main_window.subprocess.Popen") as mock_popen:
+        with patch("vaultables.gui.main_window.subprocess.Popen") as mock_popen:
             win._start_external_editing(item)
             if sys.platform != "win32":
                 mock_popen.assert_called_once()
@@ -350,11 +350,11 @@ class TestArcVaultGUI(unittest.TestCase):
 
         # 2. Text detection on generic extension file
         txt_file = self.root_path / "README"
-        txt_file.write_text("ArcVault Quickstart Guide", encoding="utf-8")
+        txt_file.write_text("Vaultables Quickstart Guide", encoding="utf-8")
         readme_item = ArchiveItem(name="README", path="README", size=25, category=FileCategory.GENERIC)
         panel.show_preview(readme_item, txt_file)
         self.assertEqual(panel.stack.currentIndex(), 1)
-        self.assertIn("ArcVault Quickstart Guide", panel.text_edit.toPlainText())
+        self.assertIn("Vaultables Quickstart Guide", panel.text_edit.toPlainText())
 
 
     def test_recursive_search_in_gui_and_reveal_flow(self) -> None:
@@ -582,7 +582,7 @@ class TestArcVaultGUI(unittest.TestCase):
 
     def test_export_files_worker_with_entry_points(self) -> None:
         """Verify ExportFilesWorker correctly exports entire entry point to destination folder."""
-        from arc_vault.gui.workers import ExportFilesWorker
+        from vaultables.gui.workers import ExportFilesWorker
 
         vault_dir = self.root_path / "WorkerExportVault"
         vault = Vault.create_vault(
@@ -614,18 +614,18 @@ class TestArcVaultGUI(unittest.TestCase):
 
     def test_create_vault_dialog_obfuscation_option(self) -> None:
         """Verify CreateVaultDialog has obfuscation checkbox defaulting to checked."""
-        from arc_vault.gui.vault_dialog import CreateVaultDialog
+        from vaultables.gui.vault_dialog import CreateVaultDialog
 
         dlg = CreateVaultDialog(dark_mode=True)
         self.assertTrue(hasattr(dlg, "chk_obfuscate"))
         self.assertTrue(dlg.chk_obfuscate.isChecked())
-        self.assertEqual(dlg.chk_obfuscate.text(), "Obfuscate folder & file names in arc-data")
+        self.assertEqual(dlg.chk_obfuscate.text(), "Obfuscate folder & file names in vaultables-data")
         dlg.close()
 
 
     def test_about_dialog_and_special_thanks(self) -> None:
         """Verify AboutDialog contains contributors and special thanks credits for 7-Zip and libraries."""
-        from arc_vault.gui.about_dialog import AboutDialog
+        from vaultables.gui.about_dialog import AboutDialog
 
         dlg = AboutDialog(dark_mode=True)
         # Verify credits in dialog
@@ -645,7 +645,7 @@ class TestArcVaultGUI(unittest.TestCase):
     def test_create_vault_dialog_blocks_existing_vault_folder(self) -> None:
         """Verify CreateVaultDialog rejects creating a vault in an existing vault or its subfolders."""
         from PyQt6.QtWidgets import QMessageBox
-        from arc_vault.gui.vault_dialog import CreateVaultDialog
+        from vaultables.gui.vault_dialog import CreateVaultDialog
 
         vault_dir = self.root_path / "gui_existing_vault"
         Vault.create_vault(
@@ -684,7 +684,7 @@ class TestArcVaultGUI(unittest.TestCase):
     def test_rename_vault_display_name_in_gui(self) -> None:
         """Verify changing vault display name via GUI updates vault, config, and sidebar."""
         from PyQt6.QtWidgets import QInputDialog
-        from arc_vault.gui.main_window import MainWindow
+        from vaultables.gui.main_window import MainWindow
 
         vault_dir = self.root_path / "rename_gui_vault"
         vault = Vault.create_vault(
@@ -720,8 +720,8 @@ class TestArcVaultGUI(unittest.TestCase):
     def test_check_imports_in_gui(self) -> None:
         """Verify 'Check Imports' toolbar action processes off-site files and prompts user."""
         from PyQt6.QtWidgets import QMessageBox
-        from arc_vault.core.sevenzip import SevenZip
-        from arc_vault.gui.main_window import MainWindow
+        from vaultables.core.sevenzip import SevenZip
+        from vaultables.gui.main_window import MainWindow
 
         vault_dir = self.root_path / "gui_import_vault"
         vault = Vault.create_vault(
@@ -762,5 +762,39 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertIn("Imported 1 off-site archive(s)", win.status_bar.currentMessage())
         win.close()
 
+
+    def test_create_entry_point_dialog_on_demand_obfuscation(self) -> None:
+        """Verify CreateEntryPointDialog text and settings for obfuscated vs unobfuscated vaults."""
+        from vaultables.gui.vault_dialog import CreateEntryPointDialog
+
+        # In an obfuscated vault:
+        dlg_obf = CreateEntryPointDialog(vault_is_obfuscated=True)
+        self.assertEqual(
+            dlg_obf.chk_obfuscation_override.text(),
+            "Obfuscated vault, but this entry point is easily readable",
+        )
+        self.assertFalse(dlg_obf.chk_obfuscation_override.isChecked())
+        # Default is obfuscated (True)
+        self.assertTrue(dlg_obf.get_obfuscate_setting())
+        # If user checks override -> easily readable (False)
+        dlg_obf.chk_obfuscation_override.setChecked(True)
+        self.assertFalse(dlg_obf.get_obfuscate_setting())
+        dlg_obf.close()
+
+        # In an unobfuscated vault:
+        dlg_plain = CreateEntryPointDialog(vault_is_obfuscated=False)
+        self.assertEqual(
+            dlg_plain.chk_obfuscation_override.text(),
+            "Unobfuscated vault, but this entry point has names randomized",
+        )
+        self.assertFalse(dlg_plain.chk_obfuscation_override.isChecked())
+        # Default is unobfuscated (False)
+        self.assertFalse(dlg_plain.get_obfuscate_setting())
+        # If user checks override -> randomized (True)
+        dlg_plain.chk_obfuscation_override.setChecked(True)
+        self.assertTrue(dlg_plain.get_obfuscate_setting())
+        dlg_plain.close()
+
 if __name__ == "__main__":
+
     unittest.main()

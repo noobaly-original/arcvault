@@ -1,4 +1,4 @@
-"""Centralized logging system for ArcVault capturing Python runtime events and 7-Zip outputs."""
+"""Centralized logging system for Vaultables capturing Python runtime events and 7-Zip outputs."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def clear_log_history() -> None:
     _log_history.clear()
 
 
-class _ArcVaultLogHandler(logging.Handler):
+class _VaultablesLogHandler(logging.Handler):
     """Custom logging handler bridging standard Python logging to PyQt signals."""
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -61,12 +61,12 @@ class _ArcVaultLogHandler(logging.Handler):
 
 
 # Configure global logger
-_logger = logging.getLogger("ArcVault")
+_logger = logging.getLogger("Vaultables")
 _logger.setLevel(logging.DEBUG)
 _logger.propagate = False
 
 _formatter = logging.Formatter("%(message)s")
-_handler = _ArcVaultLogHandler()
+_handler = _VaultablesLogHandler()
 _handler.setFormatter(_formatter)
 _logger.addHandler(_handler)
 

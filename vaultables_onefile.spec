@@ -8,18 +8,18 @@ block_cipher = None
 project_root = Path(os.path.abspath(".")).resolve()
 
 if sys.platform == "darwin":
-    icon_file = "arc_vault/resources/ArcVault.icns"
+    icon_file = "vaultables/resources/Vaultables.icns"
 elif sys.platform == "win32":
-    icon_file = "arc_vault/resources/ArcVault.ico"
+    icon_file = "vaultables/resources/Vaultables.ico"
 else:
-    icon_file = "arc_vault/resources/icon.png"
+    icon_file = "vaultables/resources/icon.png"
 
 a = Analysis(
     ["run.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        ("arc_vault/resources", "arc_vault/resources"),
+        ("vaultables/resources", "vaultables/resources"),
     ],
     hiddenimports=[
         "PyQt6.QtCore",
@@ -51,7 +51,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="ArcVault",
+    name="Vaultables",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -70,14 +70,14 @@ exe = EXE(
 if sys.platform == "darwin" and os.environ.get("BUILD_MACOS_BUNDLE", "0") == "1":
     app = BUNDLE(
         exe,
-        name="ArcVault.app",
+        name="Vaultables.app",
         icon=icon_file,
-        bundle_identifier="com.arcvault.desktop",
+        bundle_identifier="com.vaultables.desktop",
         info_plist={
             "CFBundleShortVersionString": "1.5.1",
             "CFBundleVersion": "1.5.1",
             "NSHighResolutionCapable": "True",
-            "CFBundleDisplayName": "ArcVault",
-            "CFBundleName": "ArcVault",
+            "CFBundleDisplayName": "Vaultables",
+            "CFBundleName": "Vaultables",
         },
     )
