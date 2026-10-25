@@ -513,10 +513,17 @@ class Vault:
 
         return imported_count
 
+    def clear_cache(self) -> None:
+        """Clear all in-memory item caches and cached metadata, forcing fresh reads from disk."""
+        self._cache.clear()
+        self._v2_metadata.clear()
+
     def refresh_entry_points(self) -> Dict[str, EntryPoint]:
         """Scan vault root for .7z files and load V2 metadata."""
         if not self.is_unlocked:
             return {}
+
+        self._cache.clear()
 
         # Auto-process pending off-site imports if any exist
         if not self._is_importing and self.import_dir.exists():
@@ -529,11 +536,13 @@ class Vault:
                 self.last_imported_count += imported
 
         self.entry_points.clear()
+        found_ep_names = set()
         for file in sorted(self.root_dir.glob("*.7z")):
             if file.name.startswith(".") or file.name.endswith(".bak") or file.name == self.CHECK_FILENAME:
                 continue
 
             ep_name = file.stem
+            found_ep_names.add(ep_name)
             meta = self._load_or_migrate_entry_point(ep_name, file)
             self._v2_metadata[ep_name] = meta
 
@@ -554,6 +563,11 @@ class Vault:
                 size_on_disk=size_on_disk,
                 item_count=item_count,
             )
+
+        # Remove any cached metadata for entry points that were deleted from disk
+        stale_meta = [name for name in self._v2_metadata if name not in found_ep_names]
+        for name in stale_meta:
+            self._v2_metadata.pop(name, None)
 
         return self.entry_points
 
@@ -744,7 +758,7 @@ class Vault:
             return self._cache[entry_point_name]
 
         meta = self._v2_metadata.get(entry_point_name)
-        if not meta:
+        if meta is None or force_reload:
             ep_file = self.entry_points[entry_point_name].archive_file
             meta = self._load_or_migrate_entry_point(entry_point_name, ep_file)
             self._v2_metadata[entry_point_name] = meta
@@ -760,9 +774,11 @@ class Vault:
         self.entry_points[entry_point_name].children = items
         return items
 
-    def get_items_in_directory(self, entry_point_name: str, subfolder_path: str = "") -> List[ArchiveItem]:
+    def get_items_in_directory(
+        self, entry_point_name: str, subfolder_path: str = "", force_reload: bool = False
+    ) -> List[ArchiveItem]:
         """List immediate children (files and subfolders) inside a specific subfolder."""
-        all_items = self.get_archive_items(entry_point_name)
+        all_items = self.get_archive_items(entry_point_name, force_reload=force_reload)
         norm_sub = subfolder_path.strip("/").replace("\\", "/")
 
         results_dict: Dict[str, ArchiveItem] = {}

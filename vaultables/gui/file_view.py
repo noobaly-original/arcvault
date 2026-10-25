@@ -200,6 +200,7 @@ class FileExplorerView(QWidget):
     internal_move_requested = pyqtSignal(str, list, object)  # (source_ep, item_paths, target_item)
     search_requested = pyqtSignal(str, str)  # (query_string, scope) -> scope in ("vault", "entry_point", "folder")
     reveal_requested = pyqtSignal(ArchiveItem)  # Reveal in enclosing vault folder
+    refresh_requested = pyqtSignal()
 
     COLUMNS_NORMAL = ["Name", "Size", "Type", "Modified", "Packed"]
     COLUMNS_SEARCH = ["Name", "Location", "Size", "Type", "Modified", "Packed"]
@@ -689,5 +690,10 @@ class FileExplorerView(QWidget):
             new_folder_act = menu.addAction("New Folder...")
             new_folder_act.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=16))
             new_folder_act.triggered.connect(self.create_folder_requested.emit)
+
+        menu.addSeparator()
+        refresh_act = menu.addAction("Refresh View")
+        refresh_act.setIcon(IconProvider.get_icon("refresh", dark_mode=self.dark_mode, size=16))
+        refresh_act.triggered.connect(self.refresh_requested.emit)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))

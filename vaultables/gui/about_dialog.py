@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vaultables import __version__
 from vaultables.gui.icons import IconProvider
 
 
@@ -45,7 +46,7 @@ class AboutDialog(QDialog):
         title_lbl = QLabel("Vaultables", self)
         title_lbl.setStyleSheet("font-size: 20px; font-weight: 800; letter-spacing: -0.5px;")
 
-        ver_lbl = QLabel("Version 2.0 • Chunked Decoupled Architecture", self)
+        ver_lbl = QLabel(f"Version {__version__} • Chunked Decoupled Architecture", self)
         ver_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 600;" if self.dark_mode else "color: #0284c7; font-size: 12px; font-weight: 600;")
 
         sub_lbl = QLabel("Fast, Lightweight Encrypted Archive Explorer & Vault Utility", self)

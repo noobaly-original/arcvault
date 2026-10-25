@@ -36,15 +36,24 @@ class LoadItemsWorker(QThread):
 
     items_loaded = pyqtSignal(list, str)  # (List[ArchiveItem], error_message)
 
-    def __init__(self, vault: Vault, entry_point_name: str, subfolder: str = "") -> None:
+    def __init__(
+        self,
+        vault: Vault,
+        entry_point_name: str,
+        subfolder: str = "",
+        force_reload: bool = False,
+    ) -> None:
         super().__init__()
         self.vault = vault
         self.entry_point_name = entry_point_name
         self.subfolder = subfolder
+        self.force_reload = force_reload
 
     def run(self) -> None:
         try:
-            items = self.vault.get_items_in_directory(self.entry_point_name, self.subfolder)
+            items = self.vault.get_items_in_directory(
+                self.entry_point_name, self.subfolder, force_reload=self.force_reload
+            )
             self.items_loaded.emit(items, "")
         except Exception as e:
             self.items_loaded.emit([], str(e))

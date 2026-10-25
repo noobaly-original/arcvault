@@ -885,6 +885,63 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertTrue((plain_vault.arc_data_dir / meta_secret.ep_dir_id / item_meta.item_id / "chunk_000.7z").is_file())
         self.assertFalse((plain_vault.arc_data_dir / "secret_ep").exists())
 
+
+    def test_refresh_view_and_cache_invalidation(self) -> None:
+        """Verify Vault.clear_cache(), refresh_entry_points(), and force_reload invalidate cache accurately."""
+        vault_dir = self.root_path / "refresh_test_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Refresh Test Vault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        f1 = self.root_path / "item1.txt"
+        f1.write_text("item 1 content", encoding="utf-8")
+        vault.add_files("docs", [f1])
+
+        # 1. First read populates in-memory cache
+        items = vault.get_items_in_directory("docs")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].name, "item1.txt")
+        self.assertIn("docs", vault._cache)
+
+        # 2. Simulate external addition by a second vault instance
+        f2 = self.root_path / "item2.txt"
+        f2.write_text("item 2 content", encoding="utf-8")
+        external_vault = Vault(vault_dir, self.sz)
+        self.assertTrue(external_vault.unlock(self.password))
+        external_vault.add_files("docs", [f2])
+
+        # 3. Default get_items_in_directory without force_reload uses in-memory cache
+        stale_items = vault.get_items_in_directory("docs")
+        self.assertEqual(len(stale_items), 1)
+
+        # 4. force_reload=True reloads metadata from disk
+        fresh_items = vault.get_items_in_directory("docs", force_reload=True)
+        self.assertEqual(len(fresh_items), 2)
+        names = {i.name for i in fresh_items}
+        self.assertEqual(names, {"item1.txt", "item2.txt"})
+
+        # 5. Drop file into import/ and call refresh_entry_points()
+        offsite_f = self.root_path / "imported_note.txt"
+        offsite_f.write_text("imported note content", encoding="utf-8")
+        import_7z = vault.import_dir / "notes.7z"
+        self.sz.add_files(import_7z, [offsite_f], self.password)
+        self.assertTrue(import_7z.is_file())
+
+        vault.refresh_entry_points()
+        self.assertIn("imports", vault.entry_points)
+        self.assertFalse(import_7z.exists())
+
+        # 6. Delete entry point .7z file directly from disk and test refresh_entry_points()
+        (vault_dir / "docs.7z").unlink()
+        vault.refresh_entry_points()
+        self.assertNotIn("docs", vault.entry_points)
+        self.assertNotIn("docs", vault._v2_metadata)
+        self.assertNotIn("docs", vault._cache)
+
 if __name__ == "__main__":
 
     unittest.main()

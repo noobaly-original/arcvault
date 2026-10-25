@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
 
         self.breadcrumbs = BreadcrumbBar(self.center_widget)
         self.breadcrumbs.path_changed.connect(self._on_breadcrumb_nav)
-        self.breadcrumbs.refresh_requested.connect(self.refresh_current_view)
+        self.breadcrumbs.refresh_requested.connect(lambda: self.refresh_current_view(force_reload=True))
         center_layout.addWidget(self.breadcrumbs)
 
         self.center_splitter = QSplitter(Qt.Orientation.Vertical, self.center_widget)
@@ -154,9 +154,16 @@ class MainWindow(QMainWindow):
         self.file_view.reveal_requested.connect(self._on_reveal_in_vault)
         self.file_view.list_size_changed.connect(self._on_list_size_changed)
         self.file_view.column_widths_changed.connect(self._on_column_widths_changed)
+        self.file_view.refresh_requested.connect(lambda: self.refresh_current_view(force_reload=True))
 
         self.find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self.find_shortcut.activated.connect(self._focus_search_bar)
+
+        self.refresh_shortcut_f5 = QShortcut(QKeySequence(Qt.Key.Key_F5), self)
+        self.refresh_shortcut_f5.activated.connect(lambda: self.refresh_current_view(force_reload=True))
+
+        self.refresh_shortcut_cmd_r = QShortcut(QKeySequence(QKeySequence.StandardKey.Refresh), self)
+        self.refresh_shortcut_cmd_r.activated.connect(lambda: self.refresh_current_view(force_reload=True))
 
         self.center_splitter.addWidget(self.file_view)
 
@@ -569,13 +576,26 @@ class MainWindow(QMainWindow):
         self.sidebar.set_active_entry_point(ep_name)
         self.refresh_current_view()
 
-    def refresh_current_view(self) -> None:
+    def refresh_current_view(self, force_reload: bool = False) -> None:
         if not self.vault or not self.vault.is_unlocked:
             self.file_view.set_items([])
             self.file_view.set_location_context("", "")
             self.breadcrumbs.set_path("", "")
             self.preview_panel.set_empty()
             return
+
+        if force_reload:
+            self.status_bar.showMessage("Refreshing vault contents...")
+            self.vault.clear_cache()
+            self.vault.refresh_entry_points()
+            self.sidebar.refresh_entry_points()
+            self.sidebar.refresh_vaults_list()
+            self.preview_panel.set_empty()
+
+            if self.active_entry_point and self.active_entry_point not in self.vault.entry_points:
+                self.active_entry_point = ""
+                self.current_subfolder = ""
+                self.sidebar.set_active_entry_point("")
 
         self.breadcrumbs.set_path(self.active_entry_point, self.current_subfolder)
         self.file_view.set_location_context(self.active_entry_point, self.current_subfolder)
@@ -596,11 +616,16 @@ class MainWindow(QMainWindow):
                     )
                 )
             self.file_view.set_items(items)
-            self.status_bar.showMessage(f"Vault Root: {len(items)} entry point archives.")
+            msg = f"Vault Root: {len(items)} entry point archives."
+            if getattr(self.vault, "last_imported_count", 0) > 0:
+                msg += f" (Imported {self.vault.last_imported_count} off-site archive(s))"
+            self.status_bar.showMessage(msg)
             return
 
         self.status_bar.showMessage(f"Reading '{self.active_entry_point}.7z'...")
-        self._load_worker = LoadItemsWorker(self.vault, self.active_entry_point, self.current_subfolder)
+        self._load_worker = LoadItemsWorker(
+            self.vault, self.active_entry_point, self.current_subfolder, force_reload=force_reload
+        )
         self._load_worker.items_loaded.connect(self._on_items_loaded)
         self._load_worker.start()
 
@@ -613,9 +638,10 @@ class MainWindow(QMainWindow):
         self.file_view.set_items(items)
         total_size = sum(i.size for i in items if not i.is_dir)
         folder_str = f"/{self.current_subfolder}" if self.current_subfolder else ""
-        self.status_bar.showMessage(
-            f"{self.active_entry_point}{folder_str} • {len(items)} items ({format_size(total_size)})"
-        )
+        msg = f"{self.active_entry_point}{folder_str} • {len(items)} items ({format_size(total_size)})"
+        if getattr(self.vault, "last_imported_count", 0) > 0:
+            msg += f" • Imported {self.vault.last_imported_count} off-site archive(s)"
+        self.status_bar.showMessage(msg)
 
     # --- File Explorer Interactions ---
 

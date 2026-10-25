@@ -912,6 +912,42 @@ class TestVaultablesGUI(unittest.TestCase):
         win.close()
 
 
+
+    def test_refresh_view_button_and_shortcuts(self) -> None:
+        """Verify breadcrumbs refresh button, context menu, and shortcuts trigger full forced reload."""
+        vault_dir = self.root_path / "gui_refresh_test_vault"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="Refresh GUI Vault",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.vault = vault
+        win.sidebar.set_current_vault(vault)
+        win._update_toolbar_state()
+        win.active_entry_point = "docs"
+
+        # Mock refresh_current_view to verify button click calls force_reload=True
+        with patch.object(win, "refresh_current_view") as mock_refresh:
+            win.breadcrumbs.btn_refresh.click()
+            mock_refresh.assert_called_with(force_reload=True)
+
+        with patch.object(win, "refresh_current_view") as mock_refresh_f5:
+            win.refresh_shortcut_f5.activated.emit()
+            mock_refresh_f5.assert_called_with(force_reload=True)
+
+        with patch.object(win, "refresh_current_view") as mock_refresh_cmdr:
+            win.refresh_shortcut_cmd_r.activated.emit()
+            mock_refresh_cmdr.assert_called_with(force_reload=True)
+
+        with patch.object(win, "refresh_current_view") as mock_refresh_fv:
+            win.file_view.refresh_requested.emit()
+            mock_refresh_fv.assert_called_with(force_reload=True)
+
+        win.close()
+
 if __name__ == "__main__":
 
     unittest.main()
