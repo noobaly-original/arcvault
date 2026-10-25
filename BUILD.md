@@ -148,3 +148,23 @@ The portable binary also supports command-line flags:
 ./dist/ArcVault --version
 ./dist/ArcVault --help
 ```
+
+---
+
+## 🚀 Automated Multi-Platform GitHub Releases (CI/CD)
+
+ArcVault includes a turnkey GitHub Actions workflow (`.github/workflows/release.yml`) that compiles native binaries across all major platforms and architectures on cloud runners:
+
+- **Windows x64 (AMD64)**: `ArcVault-Windows-x64.exe`
+- **Linux x64 (AMD64)**: `ArcVault-Linux-x64` & `ArcVault-Linux-x64.tar.gz`
+- **macOS Apple Silicon (ARM64)**: `ArcVault-macOS-arm64` & `ArcVault-macOS-arm64.app.zip`
+- **macOS Intel (x86_64 / AMD64)**: `ArcVault-macOS-x86_64` & `ArcVault-macOS-x86_64.app.zip`
+- **SHA256 Checksums**: `SHA256SUMS.txt`
+
+### To Trigger an Automated Release:
+Push any version tag starting with `v`:
+```bash
+git tag v2.0.0
+git push origin v2.0.0
+```
+Or manually trigger the workflow from your browser in the **Actions** tab on GitHub via **Run workflow**.
