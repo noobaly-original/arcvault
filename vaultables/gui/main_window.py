@@ -1208,8 +1208,8 @@ class MainWindow(QMainWindow):
         if res != QMessageBox.StandardButton.Yes:
             return
 
-        for it in items:
-            self.vault.delete_item(self.active_entry_point, it.path)
+        paths_to_delete = [it.path for it in items]
+        self.vault.delete_items(self.active_entry_point, paths_to_delete)
 
         self.preview_panel.set_empty()
         self.refresh_current_view()

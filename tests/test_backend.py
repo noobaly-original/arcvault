@@ -1170,6 +1170,68 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertEqual(export_progress_reports[0], (0, total_expected_size))
         self.assertEqual(export_progress_reports[-1], (total_expected_size, total_expected_size))
 
+    def test_batch_delete_items(self) -> None:
+        """Verify Vault.delete_items deletes multiple files and directories in a single batch."""
+        vault_dir = Path(self.tmp_dir) / "batch_delete_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="BatchDeleteVault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        staging = Path(self.tmp_dir) / "batch_del_stage"
+        staging.mkdir(parents=True, exist_ok=True)
+        f1 = staging / "file1.txt"
+        f1.write_text("file 1 content", encoding="utf-8")
+        f2 = staging / "file2.txt"
+        f2.write_text("file 2 content", encoding="utf-8")
+        f3 = staging / "keep.txt"
+        f3.write_text("keep this content", encoding="utf-8")
+        
+        vault.add_files("docs", [f1, f2, f3])
+        vault.create_subfolder("docs", "", "sub")
+        f4 = staging / "nested.txt"
+        f4.write_text("nested content", encoding="utf-8")
+        vault.add_files("docs", [f4], subfolder="sub")
+
+        # Verify initial state has 5 items (including folder "sub")
+        meta = vault._v2_metadata["docs"]
+        self.assertEqual(len(meta.items), 5)
+        self.assertIn("file1.txt", meta.items)
+        self.assertIn("file2.txt", meta.items)
+        self.assertIn("keep.txt", meta.items)
+        self.assertIn("sub", meta.items)
+        self.assertIn("sub/nested.txt", meta.items)
+
+        # Batch delete file1.txt, file2.txt, and folder sub/
+        ok = vault.delete_items("docs", ["file1.txt", "file2.txt", "sub"])
+        self.assertTrue(ok)
+
+        # Verify only keep.txt remains
+        remaining_items = vault.get_items_in_directory("docs")
+        self.assertEqual(len(remaining_items), 1)
+        self.assertEqual(remaining_items[0].name, "keep.txt")
+        self.assertIn("keep.txt", vault._v2_metadata["docs"].items)
+        self.assertNotIn("file1.txt", vault._v2_metadata["docs"].items)
+        self.assertNotIn("file2.txt", vault._v2_metadata["docs"].items)
+        self.assertNotIn("sub", vault._v2_metadata["docs"].items)
+        self.assertNotIn("sub/nested.txt", vault._v2_metadata["docs"].items)
+
+        # Verify keep.txt extraction works
+        preview = vault.extract_file_for_preview("docs", "keep.txt")
+        self.assertIsNotNone(preview)
+        self.assertEqual(preview.read_text(encoding="utf-8"), "keep this content")
+
+        # Single delete wrapper delete_item works
+        self.assertTrue(vault.delete_item("docs", "keep.txt"))
+        self.assertEqual(len(vault.get_items_in_directory("docs")), 0)
+
+        # Deleting empty or non-existent items returns False
+        self.assertFalse(vault.delete_items("docs", []))
+        self.assertFalse(vault.delete_items("docs", ["nonexistent.txt"]))
+
 if __name__ == "__main__":
 
     unittest.main()

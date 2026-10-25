@@ -985,6 +985,34 @@ class TestVaultablesGUI(unittest.TestCase):
         self.assertNotIn("._example.pdf", captured_names)
         self.assertNotIn(".DS_Store", captured_names)
 
+    def test_gui_delete_action_batch(self) -> None:
+        """Verify MainWindow._on_delete_action calls vault.delete_items in batch."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        vault_dir = self.root_path / "gui_del_vault"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="Del GUI Vault",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.vault = vault
+        win.active_entry_point = "docs"
+
+        items = [
+            ArchiveItem(name="file1.txt", path="file1.txt", is_dir=False),
+            ArchiveItem(name="file2.txt", path="file2.txt", is_dir=False),
+        ]
+
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            with patch.object(vault, "delete_items", wraps=vault.delete_items) as mock_del:
+                win._on_delete_action(items)
+                mock_del.assert_called_once_with("docs", ["file1.txt", "file2.txt"])
+
+        win.close()
+
 if __name__ == "__main__":
 
     unittest.main()

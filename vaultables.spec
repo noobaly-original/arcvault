@@ -88,8 +88,8 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.vaultables.desktop",
         info_plist={
-            "CFBundleShortVersionString": "2.1.4",
-            "CFBundleVersion": "2.1.4",
+            "CFBundleShortVersionString": "2.1.5",
+            "CFBundleVersion": "2.1.5",
             "NSHighResolutionCapable": "True",
             "CFBundleDisplayName": "Vaultables",
             "CFBundleName": "Vaultables",

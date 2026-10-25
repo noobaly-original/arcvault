@@ -1220,45 +1220,58 @@ class Vault:
 
     def delete_item(self, entry_point_name: str, internal_path: str) -> bool:
         """Delete an item or directory and remove its chunks from vaultables-data without re-archiving other files."""
+        return self.delete_items(entry_point_name, [internal_path])
+
+    def delete_items(self, entry_point_name: str, internal_paths: List[str]) -> bool:
+        """Delete multiple items or directories in a single batch without repeated metadata saves or rescans."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
 
-        meta = self._v2_metadata[entry_point_name]
-        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
-        clean_path = internal_path.strip("/").replace("\\", "/")
-
-        prefix = clean_path + "/"
-        to_delete_paths = [
-            p for p in meta.items.keys()
-            if p == clean_path or p.startswith(prefix)
-        ]
-
-        if not to_delete_paths:
+        if not internal_paths or entry_point_name not in self._v2_metadata:
             return False
 
-        for p in to_delete_paths:
+        meta = self._v2_metadata[entry_point_name]
+        ep_data_dir = self.arc_data_dir / meta.ep_dir_id
+
+        all_to_delete_paths: set[str] = set()
+        clean_targets: list[str] = []
+        for p_in in internal_paths:
+            clean_p = p_in.strip("/").replace("\\", "/")
+            if not clean_p:
+                continue
+            clean_targets.append(clean_p)
+            prefix = clean_p + "/"
+            for p in meta.items.keys():
+                if p == clean_p or p.startswith(prefix):
+                    all_to_delete_paths.add(p)
+
+        if not all_to_delete_paths:
+            return False
+
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        for p in all_to_delete_paths:
             item = meta.items.pop(p, None)
             if item and item.item_id:
                 item_dir = ep_data_dir / item.item_id
                 if item_dir.exists():
                     shutil.rmtree(item_dir, ignore_errors=True)
 
-        is_obf = meta.is_obfuscated(self.obfuscate_names)
         if not is_obf:
-            sanitized_path = sanitize_unobfuscated_folder_name(clean_path)
-            parent = (ep_data_dir / sanitized_path).parent
-            while parent != ep_data_dir and parent.exists():
-                try:
-                    parent.rmdir()
-                    parent = parent.parent
-                except OSError:
-                    break
+            for clean_p in clean_targets:
+                sanitized_path = sanitize_unobfuscated_folder_name(clean_p)
+                parent = (ep_data_dir / sanitized_path).parent
+                while parent != ep_data_dir and parent.exists():
+                    try:
+                        parent.rmdir()
+                        parent = parent.parent
+                    except OSError:
+                        break
 
         ep_file = self.entry_points[entry_point_name].archive_file
         self.v2_engine.save_metadata(ep_file, meta, self.password)
         self._cache.pop(entry_point_name, None)
         self.refresh_entry_points()
-        log_info(f"Deleted '{clean_path}' ({len(to_delete_paths)} items) from '{entry_point_name}.7z'")
+        log_info(f"Deleted {len(clean_targets)} target(s) ({len(all_to_delete_paths)} items) from '{entry_point_name}.7z'")
         return True
 
     def rename_item(self, entry_point_name: str, old_path: str, new_path: str) -> bool:
