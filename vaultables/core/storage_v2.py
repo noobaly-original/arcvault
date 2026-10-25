@@ -252,6 +252,7 @@ class V2StorageEngine:
                 f"-p{password}",
                 "-mhe=on",
                 "-mx=5",
+                "-mmt=on",
                 "-y",
                 temp_archive.name,
                 METADATA_FILENAME,
@@ -301,6 +302,7 @@ class V2StorageEngine:
         """
         Shred a file into 1GB encrypted chunks with store mode (-mx=0) and AES-256 (-mhe=on).
         If file <= 1GB, shredding is skipped and a single chunk_000.7z is created.
+        Streams chunks directly via stdin (-si) without intermediate disk staging for multi-part files.
         Returns (total_size, total_packed_size, chunk_list).
         """
         item_dir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +324,7 @@ class V2StorageEngine:
             })
             return file_size, packed_size, chunks
 
-        # File > chunk_size: Shred into chunks
+        # File > chunk_size: Shred into chunks directly via stdin streaming (no redundant temp file writes/reads)
         chunk_index = 0
         with open(source_file, "rb") as f_in:
             while True:
@@ -331,10 +333,7 @@ class V2StorageEngine:
                     break
 
                 chunk_file = item_dir / f"chunk_{chunk_index:03d}.7z"
-                with tempfile.TemporaryDirectory(prefix="arc_chunk_stage_") as stage_dir:
-                    part_file = Path(stage_dir) / f"part_{chunk_index:03d}"
-                    part_file.write_bytes(data)
-                    self._encrypt_chunk(chunk_file, part_file, password)
+                self._encrypt_chunk_from_bytes(chunk_file, data, f"part_{chunk_index:03d}", password)
 
                 packed_size = chunk_file.stat().st_size if chunk_file.exists() else len(data)
                 total_packed += packed_size
@@ -356,6 +355,7 @@ class V2StorageEngine:
             "a",
             "-mx=0",
             "-mhe=on",
+            "-mmt=on",
             f"-p{password}",
             "-y",
             str(chunk_archive_file.resolve()),
@@ -365,6 +365,28 @@ class V2StorageEngine:
         res = self.sevenzip._run(cmd, cwd=source_data_file.parent)
         if res.returncode not in (0, 1):
             raise SevenZipOperationError(f"Failed to encrypt chunk: {res.stderr or res.stdout}")
+        return True
+
+    def _encrypt_chunk_from_bytes(
+        self, chunk_archive_file: Path, data: bytes, internal_filename: str, password: str
+    ) -> bool:
+        """Create a single AES-256 encrypted chunk directly from memory via stdin (-si)."""
+        cmd = [
+            "a",
+            "-mx=0",
+            "-mhe=on",
+            "-mmt=on",
+            f"-p{password}",
+            "-y",
+            f"-si{internal_filename}",
+            str(chunk_archive_file.resolve()),
+        ]
+        res = self.sevenzip._run_with_input(cmd, input_bytes=data)
+        if res.returncode not in (0, 1):
+            stdout_str = res.stdout.decode("utf-8", "replace") if isinstance(res.stdout, bytes) else str(res.stdout)
+            stderr_str = res.stderr.decode("utf-8", "replace") if isinstance(res.stderr, bytes) else str(res.stderr)
+            err = (stderr_str or stdout_str).strip()
+            raise SevenZipOperationError(f"Failed to encrypt chunk from stdin: {err}")
         return True
 
     def extract_file_to_destination(
@@ -392,7 +414,7 @@ class V2StorageEngine:
             chunk_file = item_dir / item.chunks[0]["filename"]
             with tempfile.TemporaryDirectory(prefix="arc_ext_single_") as tmp_dir:
                 res = self.sevenzip._run(
-                    ["e", f"-p{password}", f"-o{tmp_dir}", "-y", str(chunk_file.resolve())]
+                    ["e", f"-p{password}", "-mmt=on", f"-o{tmp_dir}", "-y", str(chunk_file.resolve())]
                 )
                 if res.returncode not in (0, 1):
                     return False
@@ -414,7 +436,7 @@ class V2StorageEngine:
 
                 with tempfile.TemporaryDirectory(prefix="arc_ext_part_") as tmp_dir:
                     res = self.sevenzip._run(
-                        ["e", f"-p{password}", f"-o{tmp_dir}", "-y", str(chunk_file.resolve())]
+                        ["e", f"-p{password}", "-mmt=on", f"-o{tmp_dir}", "-y", str(chunk_file.resolve())]
                     )
                     if res.returncode not in (0, 1):
                         return False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import fnmatch
 import json
 import os
@@ -24,7 +25,7 @@ from vaultables.core.storage_v2 import (
     generate_unique_folder_id,
     sanitize_unobfuscated_folder_name,
 )
-from vaultables.logger import log_info, log_warning
+from vaultables.logger import log_error, log_info, log_warning
 
 
 class VaultUnlockError(Exception):
@@ -944,6 +945,7 @@ class Vault:
         """
         Add local files or directories into the entry point without re-archiving existing files.
         Chunks files > 1GB into 1GB store-mode AES-256 encrypted parts under vaultables-data.
+        Utilizes multi-threaded parallel ingestion for high disk & CPU throughput.
         """
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
@@ -959,16 +961,108 @@ class Vault:
 
         ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
-        norm_sub = subfolder.strip("/").replace("\\", "/")
+        norm_sub = subfolder.strip("/").replace(chr(92), "/")
+
+        is_obf = meta.is_obfuscated(self.obfuscate_names)
+        used_ids = {it.item_id for it in meta.items.values() if it.item_id}
+
+        file_jobs: List[Tuple[Path, Path, str, str, str, str, str]] = []
+
+        def collect_dir(source_dir: Path, parent_sub: str) -> None:
+            dir_name = source_dir.name
+            rel_dir_path = f"{parent_sub}/{dir_name}".strip("/") if parent_sub else dir_name
+
+            if is_obf:
+                folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+                used_ids.add(folder_item_id)
+            else:
+                folder_item_id = sanitize_unobfuscated_folder_name(rel_dir_path)
+
+            (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
+            mod_time = datetime.fromtimestamp(source_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            meta.items[rel_dir_path] = V2ItemMetadata(
+                path=rel_dir_path,
+                name=dir_name,
+                is_dir=True,
+                item_id=folder_item_id,
+                modified=mod_time,
+                category="FOLDER",
+            )
+
+            for child in source_dir.iterdir():
+                if is_ignorable_system_file(child):
+                    continue
+                if child.is_dir():
+                    collect_dir(child, rel_dir_path)
+                else:
+                    collect_file(child, rel_dir_path)
+
+        def collect_file(source_file: Path, target_sub: str) -> None:
+            clean_name = source_file.name
+            if is_ignorable_system_file(clean_name):
+                return
+            rel_path = f"{target_sub}/{clean_name}".strip("/") if target_sub else clean_name
+
+            if is_obf:
+                if rel_path in meta.items and meta.items[rel_path].item_id:
+                    old_dir = ep_data_dir / meta.items[rel_path].item_id
+                    if old_dir.exists():
+                        shutil.rmtree(old_dir, ignore_errors=True)
+                item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
+                used_ids.add(item_id)
+            else:
+                item_id = sanitize_unobfuscated_folder_name(rel_path)
+
+            item_dir = ep_data_dir / item_id
+            if not is_obf and item_dir.exists():
+                shutil.rmtree(item_dir, ignore_errors=True)
+
+            mod_time = datetime.fromtimestamp(source_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            cat = classify_file(clean_name, is_dir=False).name
+
+            file_jobs.append((source_file, item_dir, rel_path, clean_name, item_id, mod_time, cat))
 
         for src in source_paths:
             if not src.exists() or is_ignorable_system_file(src):
                 continue
-
             if src.is_dir():
-                self._add_directory_recursive(meta, ep_data_dir, src, parent_subfolder=norm_sub)
+                collect_dir(src, norm_sub)
             else:
-                self._add_single_file(meta, ep_data_dir, src, target_subfolder=norm_sub)
+                collect_file(src, norm_sub)
+
+        # Execute file encryption jobs in parallel
+        if file_jobs:
+            max_workers = min(os.cpu_count() or 4, 8, len(file_jobs))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_job = {
+                    executor.submit(
+                        self.v2_engine.chunk_and_encrypt_file,
+                        job[0],  # source_file
+                        job[1],  # item_dir
+                        self.password,
+                    ): job
+                    for job in file_jobs
+                }
+                for future in concurrent.futures.as_completed(future_to_job):
+                    job = future_to_job[future]
+                    source_file, item_dir, rel_path, clean_name, item_id, mod_time, cat = job
+                    try:
+                        size, packed, chunks = future.result()
+                        meta.items[rel_path] = V2ItemMetadata(
+                            path=rel_path,
+                            name=clean_name,
+                            is_dir=False,
+                            item_id=item_id,
+                            size=size,
+                            packed_size=packed,
+                            modified=mod_time,
+                            category=cat,
+                            chunks=chunks,
+                        )
+                    except Exception as e:
+                        log_error(f"Failed to chunk and encrypt {source_file.name}: {e}")
+                        raise
 
         # Save lightweight metadata
         ep_file = self.entry_points[entry_point_name].archive_file
@@ -977,7 +1071,7 @@ class Vault:
         self.refresh_entry_points()
 
         sub_desc = f"/{norm_sub}" if norm_sub else "root"
-        log_info(f"Added {len(source_paths)} items to '{entry_point_name}' ({sub_desc})")
+        log_info(f"Added {len(source_paths)} items ({len(file_jobs)} files) to '{entry_point_name}' ({sub_desc})")
         return True
 
     def _add_single_file(

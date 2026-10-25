@@ -1,6 +1,7 @@
 """Unit tests for Vaultables core logic, 7z encryption, and vault management."""
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -1031,6 +1032,104 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertNotIn("._legacy.pdf", [i.name for i in reloaded_items])
         self.assertNotIn("._legacy.pdf", vault._v2_metadata["docs"].items)
         self.assertFalse(dummy_stale_dir.exists())
+
+    def test_parallel_batch_ingestion(self) -> None:
+        """Test parallel multi-threaded ingestion of multiple files and folders in Vault.add_files."""
+        vault_dir = Path(self.tmp_dir) / "parallel_vault"
+        vault = Vault.create_vault(vault_dir, name="ParallelVault", password=self.password, initial_entry_points=["data"], sevenzip=self.sz)
+
+        # Create 10 files and 1 directory with nested files
+        staging_dir = Path(self.tmp_dir) / "batch_sources"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+
+        batch_files = []
+        for i in range(10):
+            p = staging_dir / f"file_{i:02d}.txt"
+            p.write_bytes(f"Content for file {i} ".encode("utf-8") * 50)
+            batch_files.append(p)
+
+        sub_dir = staging_dir / "nested_folder"
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        for j in range(3):
+            sub_file = sub_dir / f"nested_{j:02d}.bin"
+            sub_file.write_bytes(os.urandom(1024))
+
+        batch_files.append(sub_dir)
+
+        # Ingest entire batch in parallel
+        self.assertTrue(vault.add_files("data", batch_files))
+
+        # Verify all items in root of 'data'
+        root_items = vault.get_items_in_directory("data")
+        root_names = {it.name for it in root_items}
+        for i in range(10):
+            self.assertIn(f"file_{i:02d}.txt", root_names)
+        self.assertIn("nested_folder", root_names)
+
+        # Verify nested items
+        nested_items = vault.get_items_in_directory("data", "nested_folder")
+        nested_names = {it.name for it in nested_items}
+        for j in range(3):
+            self.assertIn(f"nested_{j:02d}.bin", nested_names)
+
+        # Verify extraction and data integrity of parallel-ingested files
+        export_dir = Path(self.tmp_dir) / "parallel_export"
+        meta = vault._v2_metadata["data"]
+        ep_data_dir = vault.arc_data_dir / meta.ep_dir_id
+        for i in range(10):
+            it = meta.items[f"file_{i:02d}.txt"]
+            out_file = export_dir / f"file_{i:02d}.txt"
+            ok = vault.v2_engine.extract_file_to_destination(
+                it, ep_data_dir / it.item_id, vault.password, out_file
+            )
+            self.assertTrue(ok)
+            expected = f"Content for file {i} ".encode("utf-8") * 50
+            self.assertEqual(out_file.read_bytes(), expected)
+
+    def test_stdin_chunking_multipart_and_reassembly(self) -> None:
+        """Test direct stdin streaming chunking and reassembly for files exceeding chunk size."""
+        vault_dir = Path(self.tmp_dir) / "chunk_stream_vault"
+        vault = Vault.create_vault(vault_dir, name="ChunkStreamVault", password=self.password, initial_entry_points=["media"], sevenzip=self.sz)
+
+        # Create a 25 KB file with non-repeating data
+        large_source = Path(self.tmp_dir) / "large_source.bin"
+        original_data = os.urandom(25 * 1024)
+        large_source.write_bytes(original_data)
+
+        # Chunk with small override (8 KB) to create 4 chunks via stdin streaming
+        chunk_target_dir = Path(self.tmp_dir) / "item_chunks"
+        chunk_target_dir.mkdir(parents=True, exist_ok=True)
+
+        size, packed, chunks = vault.v2_engine.chunk_and_encrypt_file(
+            large_source,
+            chunk_target_dir,
+            vault.password,
+            chunk_size_override=8 * 1024,
+        )
+
+        self.assertEqual(size, 25 * 1024)
+        self.assertEqual(len(chunks), 4)
+        self.assertEqual(chunks[0]["filename"], "chunk_000.7z")
+        self.assertEqual(chunks[1]["filename"], "chunk_001.7z")
+        self.assertEqual(chunks[2]["filename"], "chunk_002.7z")
+        self.assertEqual(chunks[3]["filename"], "chunk_003.7z")
+
+        # Reassemble using extract_file_to_destination
+        from vaultables.core.storage_v2 import V2ItemMetadata
+        item_meta = V2ItemMetadata(
+            path="large_source.bin",
+            name="large_source.bin",
+            chunks=chunks,
+        )
+        reassembled_dest = Path(self.tmp_dir) / "reassembled.bin"
+        success = vault.v2_engine.extract_file_to_destination(
+            item_meta,
+            chunk_target_dir,
+            vault.password,
+            reassembled_dest,
+        )
+        self.assertTrue(success)
+        self.assertEqual(reassembled_dest.read_bytes(), original_data)
 
 if __name__ == "__main__":
 

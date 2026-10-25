@@ -150,6 +150,43 @@ class SevenZip:
             raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {err}")
         return res
 
+    def _run_with_input(
+        self,
+        args: List[str],
+        input_bytes: bytes,
+        cwd: Optional[Path] = None,
+        check: bool = False,
+    ) -> subprocess.CompletedProcess:
+        """Run 7-Zip command with input piped into stdin."""
+        cmd = [self.binary] + args
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        res = subprocess.run(
+            cmd,
+            input=input_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(cwd) if cwd else None,
+            startupinfo=startupinfo,
+        )
+
+        stdout_str = res.stdout.decode("utf-8", "replace") if isinstance(res.stdout, bytes) else (res.stdout or "")
+        stderr_str = res.stderr.decode("utf-8", "replace") if isinstance(res.stderr, bytes) else (res.stderr or "")
+
+        try:
+            from vaultables.logger import log_7zip
+            log_7zip(cmd, res.returncode, stdout_str, stderr_str)
+        except Exception:
+            pass
+
+        if check and res.returncode not in (0, 1):
+            err = (stderr_str or stdout_str).strip()
+            raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {err}")
+        return res
+
     def test_archive(self, archive_path: Path, password: str) -> bool:
         """Test archive integrity and verify if password opens the archive."""
         if not archive_path.exists():
@@ -254,7 +291,7 @@ class SevenZip:
             marker.write_text("Vaultables entry point archive initialized.\n", encoding="utf-8")
 
             res = self._run(
-                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), ".vaultables_init"],
+                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-mmt=on", "-y", str(archive_path.resolve()), ".vaultables_init"],
                 cwd=Path(tmp_dir),
             )
             return res.returncode in (0, 1) and archive_path.exists()
@@ -305,6 +342,7 @@ class SevenZip:
                 f"-p{password}",
                 "-mhe=on",
                 "-mx=5",
+                "-mmt=on",
                 "-r",
                 "-y",
                 str(archive_path.resolve()),
@@ -337,7 +375,7 @@ class SevenZip:
             shutil.copy2(local_source_file, stage_path)
 
             res = self._run(
-                ["u", f"-p{password}", "-mhe=on", "-mx=5", "-y", str(archive_path.resolve()), norm_internal],
+                ["u", f"-p{password}", "-mhe=on", "-mx=5", "-mmt=on", "-y", str(archive_path.resolve()), norm_internal],
                 cwd=Path(stage_dir),
             )
             if res.returncode not in (0, 1):
@@ -361,7 +399,7 @@ class SevenZip:
             keep_file.write_text("", encoding="utf-8")
 
             res = self._run(
-                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-r", "-y", str(archive_path.resolve()), norm_path],
+                ["a", f"-p{password}", "-mhe=on", "-mx=5", "-mmt=on", "-r", "-y", str(archive_path.resolve()), norm_path],
                 cwd=Path(tmp_dir),
             )
             self._run(["d", f"-p{password}", "-mhe=on", "-y", str(archive_path.resolve()), f"{norm_path}/.keep"])
@@ -377,7 +415,7 @@ class SevenZip:
         """Extract a single file into dest_dir for preview."""
         dest_dir.mkdir(parents=True, exist_ok=True)
         res = self._run(
-            ["e", f"-p{password}", f"-o{str(dest_dir.resolve())}", "-y", str(archive_path.resolve()), internal_path]
+            ["e", f"-p{password}", "-mmt=on", f"-o{str(dest_dir.resolve())}", "-y", str(archive_path.resolve()), internal_path]
         )
         if res.returncode not in (0, 1):
             return None
@@ -395,7 +433,7 @@ class SevenZip:
     ) -> bool:
         """Extract selected items or entire archive preserving directory hierarchy."""
         destination_dir.mkdir(parents=True, exist_ok=True)
-        cmd = ["x", f"-p{password}", f"-o{str(destination_dir.resolve())}", "-y", str(archive_path.resolve())]
+        cmd = ["x", f"-p{password}", "-mmt=on", f"-o{str(destination_dir.resolve())}", "-y", str(archive_path.resolve())]
         if internal_paths:
             cmd.extend(internal_paths)
         res = self._run(cmd)
