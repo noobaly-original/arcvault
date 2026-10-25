@@ -74,8 +74,8 @@ if sys.platform == "darwin" and os.environ.get("BUILD_MACOS_BUNDLE", "0") == "1"
         icon=icon_file,
         bundle_identifier="com.arcvault.desktop",
         info_plist={
-            "CFBundleShortVersionString": "2.0.0",
-            "CFBundleVersion": "2.0.0",
+            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": "1.0.0",
             "NSHighResolutionCapable": "True",
             "CFBundleDisplayName": "ArcVault",
             "CFBundleName": "ArcVault",
