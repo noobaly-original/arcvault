@@ -1013,6 +1013,82 @@ class TestVaultablesGUI(unittest.TestCase):
 
         win.close()
 
+    def test_status_bar_selection_binding(self) -> None:
+        """Verify status bar dynamically reflects single selection, multi-selection, and view summary."""
+        vault_dir = self.root_path / "gui_status_vault"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="Status Vault",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.vault = vault
+        win.active_entry_point = "docs"
+
+        f1 = ArchiveItem(name="report.pdf", path="report.pdf", size=1024 * 50, is_dir=False, modified="2026-10-26 12:00:00")
+        f2 = ArchiveItem(name="photo.jpg", path="photo.jpg", size=1024 * 100, is_dir=False, modified="2026-10-26 12:05:00")
+        folder = ArchiveItem(name="archive_dir", path="archive_dir", size=0, is_dir=True)
+
+        win.file_view.displayed_items = [f1, f2, folder]
+
+        # 1. Single file selection
+        win._on_selection_changed([f1])
+        msg_single = win.status_bar.currentMessage()
+        self.assertIn("Selected: report.pdf", msg_single)
+        self.assertIn("50.0 KB", msg_single)
+
+        # 2. Single folder selection
+        win._on_selection_changed([folder])
+        msg_folder = win.status_bar.currentMessage()
+        self.assertIn("Selected: archive_dir", msg_folder)
+        self.assertIn("Folder", msg_folder)
+
+        # 3. Multi-selection
+        win._on_selection_changed([f1, f2, folder])
+        msg_multi = win.status_bar.currentMessage()
+        self.assertIn("3 items selected", msg_multi)
+        self.assertIn("150.0 KB", msg_multi)
+        self.assertIn("2 file(s), 1 folder(s)", msg_multi)
+
+        # 4. Cleared selection restores view summary
+        win._on_selection_changed([])
+        msg_cleared = win.status_bar.currentMessage()
+        self.assertIn("docs", msg_cleared)
+        self.assertIn("3 items", msg_cleared)
+
+        win.close()
+
+    def test_status_bar_ui_toggles_and_panels(self) -> None:
+        """Verify theme, preview, and logs toggles update status bar."""
+        win = MainWindow(self.config, auto_unlock_last=False)
+
+        # Theme toggle
+        initial_dark = win.dark_mode
+        win._toggle_theme()
+        self.assertIn("Theme switched to", win.status_bar.currentMessage())
+        self.assertIn("Dark" if not initial_dark else "Light", win.status_bar.currentMessage())
+
+        # Preview toggle
+        win._toggle_preview_panel()
+        self.assertIn("Preview panel", win.status_bar.currentMessage())
+
+        # Logs toggle
+        win._toggle_logs_panel()
+        self.assertIn("Vault activity logs shown", win.status_bar.currentMessage())
+        win._toggle_logs_panel()
+        self.assertIn("Vault activity logs hidden", win.status_bar.currentMessage())
+
+        # PreviewPanel and LogsPanel status message forwarding
+        win.preview_panel.status_message.emit("Test preview status feedback")
+        self.assertEqual(win.status_bar.currentMessage(), "Test preview status feedback")
+
+        win.logs_panel.status_message.emit("Test logs status feedback")
+        self.assertEqual(win.status_bar.currentMessage(), "Test logs status feedback")
+
+        win.close()
+
 if __name__ == "__main__":
 
     unittest.main()

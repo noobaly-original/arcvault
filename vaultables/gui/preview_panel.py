@@ -55,6 +55,7 @@ class PreviewPanel(QWidget):
     export_requested = pyqtSignal(ArchiveItem)
     save_text_requested = pyqtSignal(object, str)  # (ArchiveItem, new_text)
     edit_external_requested = pyqtSignal(object)   # ArchiveItem
+    status_message = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -421,12 +422,18 @@ class PreviewPanel(QWidget):
         self.btn_save_text.setVisible(True)
         self.btn_cancel_edit.setVisible(True)
         self.text_edit.setFocus()
+        name = self.current_item.name if self.current_item else "file"
+        self.status_message.emit(f"Editing '{name}' in-app. Click Save or press Ctrl+S when done.")
 
     def _cancel_text_edit(self) -> None:
         """Cancel editing mode and restore original view."""
+        was_editing = self._is_editing_text
         self._is_editing_text = False
         if self.current_item and self.current_file_path:
             self._show_text(self.current_item, self.current_file_path)
+        if was_editing:
+            name = self.current_item.name if self.current_item else "file"
+            self.status_message.emit(f"Discarded in-app edits for '{name}'.")
 
     def _save_in_app_text(self) -> None:
         """Emit save signal with updated text content."""
@@ -500,11 +507,14 @@ class PreviewPanel(QWidget):
     def _copy_text(self) -> None:
         clipboard = QApplication.clipboard()
         clipboard.setText(self.text_edit.toPlainText())
+        self.status_message.emit("Copied preview text to clipboard.")
 
     def _open_external(self) -> None:
         if not self.current_file_path or not self.current_file_path.exists():
             return
 
+        name = self.current_item.name if self.current_item else self.current_file_path.name
+        self.status_message.emit(f"Opening '{name}' in system application...")
         path_str = str(self.current_file_path.resolve())
         try:
             if sys.platform == "darwin":

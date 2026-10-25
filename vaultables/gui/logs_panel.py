@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 from typing import List, Optional
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -25,6 +25,8 @@ from vaultables.logger import LogEntry, clear_log_history, get_log_history, log_
 
 class LogsPanel(QWidget):
     """Toggleable bottom pane displaying real-time application logs and 7-Zip commands."""
+
+    status_message = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -208,6 +210,7 @@ class LogsPanel(QWidget):
         if plain_text:
             QApplication.clipboard().setText(plain_text)
             self.btn_copy.setText("Copied!")
+            self.status_message.emit("Copied vault activity logs to clipboard.")
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(1500, lambda: self.btn_copy.setText("Copy"))
 
@@ -215,6 +218,7 @@ class LogsPanel(QWidget):
         self._entries.clear()
         clear_log_history()
         self.text_edit.clear()
+        self.status_message.emit("Activity logs cleared.")
 
     def set_theme(self, dark_mode: bool) -> None:
         self.dark_mode = dark_mode

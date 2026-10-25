@@ -187,6 +187,7 @@ class FileTableWidget(QTableWidget):
 class FileExplorerView(QWidget):
     """File table view with recursive search, multi-scope filtering, and drag-and-drop actions."""
 
+    selection_changed = pyqtSignal(list)  # List[ArchiveItem]
     item_selected = pyqtSignal(object)  # Optional[ArchiveItem]
     item_double_clicked = pyqtSignal(object)  # ArchiveItem
     files_dropped_on_folder = pyqtSignal(list, str)  # (List[Path], target_subfolder_str)
@@ -581,6 +582,7 @@ class FileExplorerView(QWidget):
 
     def _on_selection_changed(self) -> None:
         items = self.get_selected_items()
+        self.selection_changed.emit(items)
         if len(items) == 1:
             self.item_selected.emit(items[0])
         else:

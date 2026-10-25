@@ -158,6 +158,7 @@ class MainWindow(QMainWindow):
         self.file_view.reveal_requested.connect(self._on_reveal_in_vault)
         self.file_view.list_size_changed.connect(self._on_list_size_changed)
         self.file_view.column_widths_changed.connect(self._on_column_widths_changed)
+        self.file_view.selection_changed.connect(self._on_selection_changed)
         self.file_view.refresh_requested.connect(lambda: self.refresh_current_view(force_reload=True))
 
         self.find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
@@ -172,6 +173,7 @@ class MainWindow(QMainWindow):
         self.center_splitter.addWidget(self.file_view)
 
         self.logs_panel = LogsPanel(self.center_splitter)
+        self.logs_panel.status_message.connect(lambda msg: self.status_bar.showMessage(msg, 3500))
         self.logs_panel.hide()
         self.center_splitter.addWidget(self.logs_panel)
         self.center_splitter.setSizes([500, 160])
@@ -182,6 +184,7 @@ class MainWindow(QMainWindow):
 
         # 3. Right Preview & Edit Panel
         self.preview_panel = PreviewPanel(self.main_splitter)
+        self.preview_panel.status_message.connect(lambda msg: self.status_bar.showMessage(msg, 3500))
         self.preview_panel.export_requested.connect(lambda item: self._on_export_action([item]))
         self.preview_panel.save_text_requested.connect(self._on_save_in_app_text)
         self.preview_panel.edit_external_requested.connect(self._start_external_editing)
@@ -195,6 +198,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.main_splitter)
 
         self._build_toolbar()
+
+        self._status_override: str = ""
 
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
@@ -383,6 +388,8 @@ class MainWindow(QMainWindow):
         self.config.theme = "dark" if self.dark_mode else "light"
         self.config.save()
         self._apply_theme()
+        theme_name = "Dark" if self.dark_mode else "Light"
+        self.status_bar.showMessage(f"Theme switched to {theme_name} mode.", 3000)
 
     def _show_about_dialog(self) -> None:
         from vaultables.gui.about_dialog import AboutDialog
@@ -400,15 +407,19 @@ class MainWindow(QMainWindow):
                 total = sum(sizes) if sum(sizes) > 600 else self.main_splitter.width()
                 center_w = max(260, total - sb_w - preview_w)
                 self.main_splitter.setSizes([sb_w, center_w, preview_w])
+            self.status_bar.showMessage("Preview panel shown.", 2500)
         else:
             self.preview_panel.hide()
+            self.status_bar.showMessage("Preview panel hidden.", 2500)
 
     def _toggle_logs_panel(self) -> None:
         if self.logs_panel.isHidden():
             self.logs_panel.show()
             self.center_splitter.setSizes([380, 180])
+            self.status_bar.showMessage("Vault activity logs shown.", 2500)
         else:
             self.logs_panel.hide()
+            self.status_bar.showMessage("Vault activity logs hidden.", 2500)
 
     # --- Vault Operations ---
 
@@ -417,6 +428,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Vault Not Found", f"Directory '{path}' does not exist.")
             self.config.remove_vault(str(path))
             self.sidebar.refresh_vaults_list()
+            self.status_bar.showMessage(f"Vault folder '{path.name}' does not exist.", 4000)
             return
 
         if self.vault and self.vault.root_dir.resolve() == path.resolve() and self.vault.is_unlocked:
@@ -477,7 +489,7 @@ class MainWindow(QMainWindow):
             if dlg_unlock.exec() == UnlockVaultDialog.DialogCode.Accepted:
                 self.sidebar.set_current_vault(self.vault)
                 self._update_toolbar_state()
-                self.refresh_current_view()
+                self.refresh_current_view(status_override=f"Created and unlocked vault '{dlg.created_vault_name}'.")
 
     def _on_check_imports_action(self) -> None:
         """Scan and import off-site .7z files from the vault's import/ folder."""
@@ -494,6 +506,7 @@ class MainWindow(QMainWindow):
                 f"Successfully imported {count} archive(s) from the 'import/' folder into 'imports'.",
             )
         else:
+            self.status_bar.showMessage("No pending encrypted archives found in 'import/' folder.", 4000)
             msg = (
                 "No pending encrypted .7z archives were found in the 'import/' folder.\n\n"
                 "To import files from other devices, compress them with 7z using your vault password, "
@@ -526,12 +539,14 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if res == QMessageBox.StandardButton.Yes:
+            vault_name = vault_path.name
             if self.vault and self.vault.root_dir.resolve() == vault_path.resolve():
                 self.lock_vault()
                 self.vault = None
                 self.sidebar.set_current_vault(None)
             self.config.remove_vault(str(vault_path))
             self.sidebar.refresh_vaults_list()
+            self.status_bar.showMessage(f"Removed vault '{vault_name}' from known vaults.", 3500)
 
     def _on_rename_vault_display_name(self, vault_path: Optional[Path]) -> None:
         """Prompt user and change the display name of a vault (persists to .vaultables and config)."""
@@ -603,7 +618,8 @@ class MainWindow(QMainWindow):
         self.sidebar.set_active_entry_point(ep_name)
         self.refresh_current_view()
 
-    def refresh_current_view(self, force_reload: bool = False) -> None:
+    def refresh_current_view(self, force_reload: bool = False, status_override: str = "") -> None:
+        self._status_override = status_override
         if not self.vault or not self.vault.is_unlocked:
             self.file_view.set_items([])
             self.file_view.set_location_context("", "")
@@ -643,13 +659,15 @@ class MainWindow(QMainWindow):
                     )
                 )
             self.file_view.set_items(items)
-            msg = f"Vault Root: {len(items)} entry point archives."
-            if getattr(self.vault, "last_imported_count", 0) > 0:
-                msg += f" (Imported {self.vault.last_imported_count} off-site archive(s))"
-            self.status_bar.showMessage(msg)
+            if self._status_override:
+                self.status_bar.showMessage(self._status_override)
+                self._status_override = ""
+            else:
+                self._update_view_status_bar()
             return
 
-        self.status_bar.showMessage(f"Reading '{self.active_entry_point}.7z'...")
+        if not self._status_override:
+            self.status_bar.showMessage(f"Reading '{self.active_entry_point}.7z'...")
         self._load_worker = LoadItemsWorker(
             self.vault, self.active_entry_point, self.current_subfolder, force_reload=force_reload
         )
@@ -663,12 +681,56 @@ class MainWindow(QMainWindow):
             return
 
         self.file_view.set_items(items)
+        if self._status_override:
+            self.status_bar.showMessage(self._status_override)
+            self._status_override = ""
+        else:
+            self._update_view_status_bar()
+
+    def _update_view_status_bar(self) -> None:
+        """Display current view directory info on the status bar when no items are selected."""
+        if not self.vault or not self.vault.is_unlocked:
+            self.status_bar.showMessage("Ready. Select or create an encrypted vault to begin.")
+            return
+
+        if not self.active_entry_point:
+            items = self.file_view.displayed_items
+            msg = f"Vault Root: {len(items)} entry point archives."
+            if getattr(self.vault, "last_imported_count", 0) > 0:
+                msg += f" (Imported {self.vault.last_imported_count} off-site archive(s))"
+            self.status_bar.showMessage(msg)
+            return
+
+        items = self.file_view.displayed_items
         total_size = sum(i.size for i in items if not i.is_dir)
         folder_str = f"/{self.current_subfolder}" if self.current_subfolder else ""
         msg = f"{self.active_entry_point}{folder_str} • {len(items)} items ({format_size(total_size)})"
         if getattr(self.vault, "last_imported_count", 0) > 0:
             msg += f" • Imported {self.vault.last_imported_count} off-site archive(s)"
         self.status_bar.showMessage(msg)
+
+    def _on_selection_changed(self, items: List[ArchiveItem]) -> None:
+        """Update status bar with item details or multi-selection summary."""
+        if not items:
+            self._update_view_status_bar()
+            return
+
+        if len(items) == 1:
+            it = items[0]
+            if it.is_dir:
+                cat = "Entry Point" if it.category == FileCategory.ENTRY_POINT else "Folder"
+                self.status_bar.showMessage(f"Selected: {it.name} • {cat}")
+            else:
+                self.status_bar.showMessage(
+                    f"Selected: {it.name} ({format_size(it.size)}) • {it.category.value} • Modified: {it.modified or 'Unknown'}"
+                )
+        else:
+            total_size = sum(i.size for i in items if not i.is_dir)
+            dirs = sum(1 for i in items if i.is_dir)
+            files = len(items) - dirs
+            self.status_bar.showMessage(
+                f"{len(items)} items selected ({format_size(total_size)}) • {files} file(s), {dirs} folder(s)"
+            )
 
     # --- File Explorer Interactions ---
 
@@ -699,9 +761,11 @@ class MainWindow(QMainWindow):
     def _on_preview_extracted(self, item: ArchiveItem, local_path: Optional[Path], err: str) -> None:
         if local_path and local_path.exists():
             self.preview_panel.show_preview(item, local_path)
+            self.status_bar.showMessage(f"Preview loaded: '{item.name}' ({format_size(item.size)})", 3000)
         else:
             note = err if err else ("File exceeds 1GB preview threshold." if item.size > 1024 * 1024 * 1024 else "Preview unavailable.")
             self.preview_panel.show_card_only(item, status_note=note)
+            self.status_bar.showMessage(f"Preview unavailable for '{item.name}'.", 3000)
 
     def _on_file_double_clicked(self, item: ArchiveItem) -> None:
         if item.category == FileCategory.ENTRY_POINT or (not self.active_entry_point and item.is_dir):
@@ -730,6 +794,7 @@ class MainWindow(QMainWindow):
     def _focus_search_bar(self) -> None:
         self.file_view.search_bar.setFocus()
         self.file_view.search_bar.selectAll()
+        self.status_bar.showMessage("Search: enter keyword to filter files, press Esc to clear.", 3000)
 
     def _on_search_requested(self, query: str, scope: str) -> None:
         clean_q = query.strip()
@@ -855,6 +920,7 @@ class MainWindow(QMainWindow):
         if not items or not self.vault or not self.vault.is_unlocked:
             return
 
+        self.status_bar.showMessage(f"Preparing {len(items)} item(s) for drag export...")
         # Extract to temporary drag cache
         temp_drag_dir = Path(tempfile.mkdtemp(prefix="vaultables_drag_out_"))
         extracted_urls: List[QUrl] = []
@@ -890,6 +956,7 @@ class MainWindow(QMainWindow):
         drag.setPixmap(first_icon.pixmap(32, 32))
         drag.setHotSpot(QPoint(16, 16))
 
+        self.status_bar.showMessage(f"Drag export prepared for {len(items)} item(s). Drag to desktop or folder.", 3000)
         drag.exec(Qt.DropAction.CopyAction)
 
     # --- Editing Vault Archives (In-App & External) ---
@@ -910,9 +977,8 @@ class MainWindow(QMainWindow):
 
     def _on_in_app_save_finished(self, item: ArchiveItem, new_text: str, success: bool, error_msg: str) -> None:
         if success:
-            self.status_bar.showMessage(f"Successfully updated '{item.name}' in {item.entry_point_name}.7z.")
             self.preview_panel.on_save_successful(new_text)
-            self.refresh_current_view()
+            self.refresh_current_view(status_override=f"Successfully updated '{item.name}' in {item.entry_point_name}.7z.")
         else:
             QMessageBox.critical(self, "Save Failed", f"Could not update file in archive: {error_msg}")
             self.status_bar.showMessage("Save failed.")
@@ -980,13 +1046,10 @@ class MainWindow(QMainWindow):
 
         ok = self.vault.update_file_from_disk(ep_name, internal_path, p)
         if ok:
-            self.status_bar.showMessage(
-                f"Auto-saved external edits of '{p.name}' into {ep_name}.7z."
-            )
             # Re-read preview if it's currently selected
             if self.preview_panel.current_item and self.preview_panel.current_item.path == internal_path:
                 self.preview_panel.show_preview(self.preview_panel.current_item, p)
-            self.refresh_current_view()
+            self.refresh_current_view(status_override=f"Auto-saved external edits of '{p.name}' into {ep_name}.7z.")
         else:
             self.status_bar.showMessage(f"Failed to auto-save edits of '{p.name}'.")
 
@@ -1080,8 +1143,7 @@ class MainWindow(QMainWindow):
     def _on_add_finished(self, success: bool, error_msg: str) -> None:
         self._reset_progress()
         if success:
-            self.status_bar.showMessage("Files encrypted and added successfully.")
-            self.refresh_current_view()
+            self.refresh_current_view(status_override="Files encrypted and added successfully.")
         else:
             QMessageBox.critical(self, "Encryption Failed", f"Failed to add files: {error_msg}")
             self.status_bar.showMessage("Failed to add files.")
@@ -1101,9 +1163,10 @@ class MainWindow(QMainWindow):
             clean_name = name.strip()
             ok_res = self.vault.create_subfolder(self.active_entry_point, self.current_subfolder, clean_name)
             if ok_res:
-                self.refresh_current_view()
+                self.refresh_current_view(status_override=f"Created folder '{clean_name}'.")
             else:
                 QMessageBox.warning(self, "Error", "Failed to create folder.")
+                self.status_bar.showMessage("Failed to create folder.")
 
     def _on_create_entry_point(self) -> None:
         if not self.vault or not self.vault.is_unlocked:
@@ -1122,9 +1185,10 @@ class MainWindow(QMainWindow):
                 self.sidebar.refresh_entry_points()
                 self.active_entry_point = clean_name
                 self.current_subfolder = ""
-                self.refresh_current_view()
+                self.refresh_current_view(status_override=f"Created entry point '{clean_name}.7z'.")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to create entry point: {e}")
+                self.status_bar.showMessage(f"Failed to create entry point '{clean_name}'.")
 
     def _on_rename_entry_point(self, old_name: str) -> None:
         if not self.vault or not self.vault.is_unlocked:
@@ -1140,9 +1204,10 @@ class MainWindow(QMainWindow):
                 self.sidebar.refresh_entry_points()
                 if self.active_entry_point == old_name:
                     self.active_entry_point = clean_new
-                self.refresh_current_view()
+                self.refresh_current_view(status_override=f"Renamed entry point '{old_name}' to '{clean_new}'.")
             except Exception as e:
                 QMessageBox.warning(self, "Rename Error", f"Failed to rename: {e}")
+                self.status_bar.showMessage(f"Failed to rename entry point: {e}")
 
     def _on_delete_entry_point(self, ep_name: str) -> None:
         if not self.vault or not self.vault.is_unlocked:
@@ -1160,7 +1225,7 @@ class MainWindow(QMainWindow):
             if self.active_entry_point == ep_name:
                 self.active_entry_point = ""
                 self.current_subfolder = ""
-            self.refresh_current_view()
+            self.refresh_current_view(status_override=f"Deleted entry point '{ep_name}.7z'.")
 
     def _on_export_action(self, items: List[ArchiveItem]) -> None:
         if not items or not self.vault or not self.vault.is_unlocked:
@@ -1212,7 +1277,7 @@ class MainWindow(QMainWindow):
         self.vault.delete_items(self.active_entry_point, paths_to_delete)
 
         self.preview_panel.set_empty()
-        self.refresh_current_view()
+        self.refresh_current_view(status_override=f"Deleted {len(paths_to_delete)} item(s) from '{self.active_entry_point}.7z'.")
 
     def _on_rename_action(self, item: ArchiveItem) -> None:
         if not self.vault or not self.vault.is_unlocked:
@@ -1231,9 +1296,10 @@ class MainWindow(QMainWindow):
             new_path = f"{parent}/{clean_name}".strip("/") if parent else clean_name
             ok_rn = self.vault.rename_item(self.active_entry_point, item.path, new_path)
             if ok_rn:
-                self.refresh_current_view()
+                self.refresh_current_view(status_override=f"Renamed '{item.name}' to '{clean_name}'.")
             else:
                 QMessageBox.warning(self, "Rename Error", "Failed to rename item in archive.")
+                self.status_bar.showMessage(f"Failed to rename '{item.name}'.")
 
     def _on_move_action(self, items: List[ArchiveItem]) -> None:
         """Prompt user with a list of destination subfolders to move selected items into."""
@@ -1277,12 +1343,12 @@ class MainWindow(QMainWindow):
 
         ok_move = self.vault.move_items(self.active_entry_point, [i.path for i in items], target_sub)
         if ok_move:
-            self.refresh_current_view()
             dest_name = target_sub if target_sub else "root"
-            self.status_bar.showMessage(f"Moved {len(items)} item(s) to '{dest_name}'.")
+            self.refresh_current_view(status_override=f"Moved {len(items)} item(s) to '{dest_name}'.")
         else:
             QMessageBox.warning(self, "Move Error", "Failed to move one or more items.")
             self.refresh_current_view()
+            self.status_bar.showMessage("Failed to move items.")
 
     def _on_internal_move_requested(
         self,
@@ -1324,15 +1390,15 @@ class MainWindow(QMainWindow):
         if not items_to_move:
             return
 
-        self.status_bar.showMessage(f"Moving {len(items_to_move)} item(s) to '{target_subfolder or root}'...")
+        self.status_bar.showMessage(f"Moving {len(items_to_move)} item(s) to '{target_subfolder or "root"}'...")
         ok = self.vault.move_items(self.active_entry_point, items_to_move, target_subfolder)
         if ok:
-            self.refresh_current_view()
             dest_name = target_item.name if target_item else (target_subfolder or "root")
-            self.status_bar.showMessage(f"Successfully moved {len(items_to_move)} item(s) to '{dest_name}'.")
+            self.refresh_current_view(status_override=f"Successfully moved {len(items_to_move)} item(s) to '{dest_name}'.")
         else:
             QMessageBox.warning(self, "Move Error", "Failed to move one or more items.")
             self.refresh_current_view()
+            self.status_bar.showMessage("Failed to move items.")
 
     def _restore_window_state(self) -> None:
         """Restore window size, position, maximized state, and splitter layout from config."""
