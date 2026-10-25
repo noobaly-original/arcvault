@@ -751,5 +751,51 @@ class TestArcVaultBackend(unittest.TestCase):
         self.assertIn("travel", reopened_items)
         self.assertIn("extra.pdf", reopened_items)
 
+        # 7. Verify obfuscation was strictly respected in obfuscated vault
+        self.assertTrue(reopened.obfuscate_names)
+        meta_obf = reopened._v2_metadata["imports"]
+        self.assertNotEqual(meta_obf.ep_dir_id, "imports")
+        self.assertFalse((reopened.arc_data_dir / "imports").exists())
+        self.assertTrue((reopened.arc_data_dir / meta_obf.ep_dir_id).is_dir())
+
+        # 8. Verify nested subfolder cleanup inside import/
+        nested_subfolder = reopened.import_dir / "incoming_folder"
+        nested_subfolder.mkdir()
+        nested_file = offsite_stage / "subfile.txt"
+        nested_file.write_text("nested folder import test", encoding="utf-8")
+        nested_7z = nested_subfolder / "nested.7z"
+        self.sz.add_files(nested_7z, [nested_file], self.password)
+        self.assertTrue(nested_7z.exists())
+
+        imported_nested = reopened.process_pending_imports()
+        self.assertEqual(imported_nested, 1)
+        # Both archive AND the containing folder inside import/ must be deleted
+        self.assertFalse(nested_7z.exists())
+        self.assertFalse(nested_subfolder.exists())
+        self.assertTrue((reopened.import_dir / "README.txt").is_file())
+
+        # 9. Verify obfuscation respected when vault has obfuscate_names=False
+        plain_vault_dir = self.root_path / "plain_offsite_vault"
+        plain_vault = Vault.create_vault(
+            plain_vault_dir,
+            name="Plain Offsite Vault",
+            password=self.password,
+            sevenzip=self.sz,
+            obfuscate_names=False,
+        )
+        self.assertFalse(plain_vault.obfuscate_names)
+        plain_file = offsite_stage / "plain_doc.txt"
+        plain_file.write_text("plain doc content", encoding="utf-8")
+        plain_7z = plain_vault.import_dir / "plain.7z"
+        self.sz.add_files(plain_7z, [plain_file], self.password)
+
+        plain_count = plain_vault.process_pending_imports()
+        self.assertEqual(plain_count, 1)
+        self.assertFalse(plain_7z.exists())
+        # In unobfuscated vault, arc-data/imports/plain_doc.txt/chunk_000.7z must exist directly
+        plain_meta = plain_vault._v2_metadata["imports"]
+        self.assertEqual(plain_meta.ep_dir_id, "imports")
+        self.assertTrue((plain_vault.arc_data_dir / "imports" / "plain_doc.txt" / "chunk_000.7z").is_file())
+
 if __name__ == "__main__":
     unittest.main()

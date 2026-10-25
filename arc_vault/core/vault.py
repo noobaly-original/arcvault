@@ -245,19 +245,6 @@ class Vault:
         arc_data.mkdir(parents=True, exist_ok=True)
         import_dir = root_dir / cls.IMPORT_DIRNAME
         import_dir.mkdir(parents=True, exist_ok=True)
-        readme = import_dir / "README.txt"
-        if not readme.exists():
-            try:
-                readme_msg = (
-                    "ArcVault Off-site Import Folder\n"
-                    "================================\n"
-                    "Drop encrypted .7z archives here created with your vault master password.\n"
-                    "When ArcVault launches or refreshes, it will automatically decrypt, chunk, and\n"
-                    "incorporate these files into the 'imports' entry point, keeping them safely encrypted.\n"
-                )
-                readme.write_text(readme_msg, encoding="utf-8")
-            except Exception:
-                pass
 
         vault_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
@@ -289,6 +276,7 @@ class Vault:
                 if clean_name:
                     vault.create_entry_point(clean_name)
 
+        vault.ensure_import_readme()
         log_info(f"Created new vault '{name}' at {root_dir} (obfuscate_names={obfuscate_names})", category="SECURITY")
         return vault
 
@@ -320,10 +308,7 @@ class Vault:
 
         self._password = password
         self.is_unlocked = True
-        try:
-            self.import_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
+        self.ensure_import_readme()
         self.last_imported_count = self.process_pending_imports()
         self.refresh_entry_points()
         vault_title = self.metadata.name if self.metadata else self.root_dir.name
@@ -370,6 +355,52 @@ class Vault:
             self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="arcvault_watched_edit_")
         return Path(self._edit_staging_dir.name)
 
+    def ensure_import_readme(self) -> None:
+        """Create or update README.txt in the import/ directory with comprehensive usage instructions."""
+        try:
+            self.import_dir.mkdir(parents=True, exist_ok=True)
+            readme_file = self.import_dir / "README.txt"
+            readme_content = (
+                "================================================================================\n"
+                "                       ArcVault Off-site Import Folder\n"
+                "================================================================================\n\n"
+                "This folder serves as an off-site file mailbox for your encrypted ArcVault.\n"
+                "It allows you to securely import files from mobile devices (iPhone, iPad, Android)\n"
+                "or other computers where the ArcVault desktop application is not installed.\n\n"
+                "--------------------------------------------------------------------------------\n"
+                "HOW TO USE THIS FOLDER:\n"
+                "--------------------------------------------------------------------------------\n"
+                "1. Compress the files or folders you want to import into a standard '.7z' archive\n"
+                "   using any archiving tool on your device (e.g. Keka, iZip, 7-Zip, NanaZip, PeaZip).\n\n"
+                "2. Set the encryption password on the archive to your ArcVault master password.\n"
+                "   (Header encryption / -mhe=on is strongly recommended).\n\n"
+                "3. Move, copy, or sync the '.7z' archive(s) into this 'import/' folder\n"
+                "   (via Google Drive, iCloud, Nextcloud, Dropbox, AirDrop, USB, etc.).\n\n"
+                "4. Unlock your vault in ArcVault, or click 'Check Imports' in the toolbar.\n\n"
+                "--------------------------------------------------------------------------------\n"
+                "WHAT ARCVAULT DOES AUTOMATICALLY:\n"
+                "--------------------------------------------------------------------------------\n"
+                "- Tests the archive to verify it is protected with your vault master password.\n"
+                "- Temporarily extracts and re-encrypts the files into ArcVault's storage engine.\n"
+                "- Strictly respects your vault's obfuscation settings:\n"
+                "    * If obfuscation is ENABLED: Stores files under randomized privacy IDs.\n"
+                "    * If obfuscation is DISABLED: Preserves human-readable folder and file paths.\n"
+                "- Incorporates the contents into the 'imports' virtual entry point in your vault.\n"
+                "- Safely DELETES the original '.7z' archive and any empty parent folders from\n"
+                "  this 'import/' folder once import is complete so files are never re-imported.\n"
+                "- Immediately wipes all temporary plaintext staging files from disk and memory.\n\n"
+                "--------------------------------------------------------------------------------\n"
+                "SECURITY & ERROR HANDLING:\n"
+                "--------------------------------------------------------------------------------\n"
+                "- Any archive that cannot be decrypted with your vault's master password, or any\n"
+                "  corrupted file, will NOT be imported and will NOT be deleted from this folder.\n"
+                "- Non-7z files are safely ignored.\n"
+                "================================================================================\n"
+            )
+            readme_file.write_text(readme_content, encoding="utf-8")
+        except Exception:
+            pass
+
     def process_pending_imports(self) -> int:
         """
         Check the 'import/' folder for off-site encrypted .7z archives.
@@ -389,8 +420,9 @@ class Vault:
                 return 0
             return 0
 
+        self.ensure_import_readme()
         archives = [
-            f for f in sorted(self.import_dir.glob("*.7z"))
+            f for f in sorted(self.import_dir.rglob("*.7z"))
             if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
         ]
         if not archives:
@@ -451,14 +483,27 @@ class Vault:
 
                 # 5. Extraction and incorporation succeeded - clean up source archive from import folder
                 try:
-                    archive_file.unlink()
+                    if archive_file.is_dir():
+                        shutil.rmtree(archive_file, ignore_errors=True)
+                    elif archive_file.exists():
+                        archive_file.unlink()
                     imported_count += 1
                     log_info(
-                        f"Offsite import: Successfully imported '{archive_file.name}' into '{self.IMPORTS_ENTRY_POINT_NAME}' entry point.",
+                        f"Offsite import: Successfully imported '{archive_file.name}' into '{self.IMPORTS_ENTRY_POINT_NAME}' entry point and removed from import folder.",
                         category="SECURITY",
                     )
                 except Exception as e:
                     log_warning(f"Offsite import: Could not delete processed archive '{archive_file.name}': {e}")
+
+            # 6. Clean up any empty subdirectories or processed folders inside import/
+            for sub in sorted(self.import_dir.rglob("*"), reverse=True):
+                if sub.is_dir() and sub.resolve() != self.import_dir.resolve():
+                    remaining = [p for p in sub.iterdir() if p.name not in ("README.txt", ".DS_Store")]
+                    if not remaining:
+                        try:
+                            shutil.rmtree(sub, ignore_errors=True)
+                        except Exception:
+                            pass
         finally:
             self._is_importing = False
 
@@ -473,7 +518,7 @@ class Vault:
         if not self._is_importing and self.import_dir.exists():
             has_7z = any(
                 f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
-                for f in self.import_dir.glob("*.7z")
+                for f in self.import_dir.rglob("*.7z")
             )
             if has_7z:
                 imported = self.process_pending_imports()

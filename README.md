@@ -16,11 +16,18 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - **Portable Onefile Executables & USB Mode**:
   - Run ArcVault as a single, self-contained portable executable on **Windows** (`ArcVault.exe`), **Linux** (`ArcVault`), and **macOS** (`ArcVault` & `ArcVault.app`).
   - **USB Drive Portable**: If 7-Zip is not installed system-wide on the host computer, simply drop `7z.exe` / `7zz` in the same directory as ArcVault, and the app detects it automatically.
+- **Off-Site File Importer (`import/` ➔ `imports`)**:
+  - **File Liberation on Mobile & Remote Devices**: Import files without needing ArcVault installed (iPhone, iPad, Android, or secondary PCs).
+  - **Drop-Folder Workflow**: Compress files or folders into a standard `.7z` archive using your vault's master password (via mobile apps like Keka or iZip, or 7-Zip, NanaZip, PeaZip) and drop them into the vault's `import/` folder (via iCloud, Google Drive, Nextcloud, Dropbox, AirDrop, or USB).
+  - **Automatic Ingestion**: ArcVault tests password integrity, extracts files to an isolated scratchpad, re-encrypts them into native chunked storage, and incorporates them into a dedicated `imports` virtual entry point (`imports.7z`).
+  - **Strict Obfuscation Adherence**: Respects your vault's obfuscation settings—assigning random 12-character privacy IDs in obfuscated mode, or preserving clean human-readable paths (`arc-data/imports/...`) in unobfuscated mode.
+  - **Safe Cleanup**: Processed `.7z` archives and any containing subfolders inside `import/` are safely deleted upon successful ingestion, leaving only `import/README.txt` and preventing redundant re-imports.
+  - **Zero-Footprint Staging**: Scratch files extracted during staging are wiped immediately from disk and memory.
 - **Configurable Name Obfuscation**:
   - Choose during vault creation whether folder and file names in `arc-data/` are disguised with random alphanumeric IDs (default, maximum privacy) or kept as plain human-readable names on disk for users who prefer directly readable encrypted folder trees.
 - **Blazing Fast Store-Mode Encryption**: Bypasses CPU-heavy compression (`-mx=0`) while enforcing maximum AES-256 header and data encryption (`-mhe=on`), achieving native SSD throughput (500+ MB/s).
 - **Decoupled Virtual Entry Points & `arc-data/`**:
-  - Top-level archives (`photos.7z`, `documents.7z`) act as **virtual folders** holding lightweight AES-256 encrypted metadata.
+  - Top-level archives (`photos.7z`, `documents.7z`, `imports.7z`) act as **virtual folders** holding lightweight AES-256 encrypted metadata.
   - Actual contents are organized under `arc-data/{random_ep_id}/{random_item_id}/`.
   - Adding or deleting an item updates only that item's directory and a ~1 KB metadata archive, taking milliseconds instead of minutes.
   - Moving and renaming files or folders are instant metadata operations with zero disk re-writing.
@@ -33,8 +40,7 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
   - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
   - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
 - **Vault Nesting Safeguards**:
-  - ArcVault actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.arcvault`) from active vault stores.
-- **Deep Recursive Multi-Archive Search**:
+  - ArcVault actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.arcvault`) from active vault stores.\n- **Deep Recursive Multi-Archive Search**:
   - Search across all virtual entry points and nested subfolders simultaneously in milliseconds.
   - Flexible scope selection: **Entire Vault (Recursive)**, **Current Archive (Recursive)**, or **Current Folder**.
   - Supports wildcard patterns (`*.png`, `*report*`, `invoice_??.pdf`) and substring text matching.
@@ -140,6 +146,9 @@ When ArcVault creates a vault named `MyVault`, the filesystem structure looks li
 MyVault/
 ├── .arcvault                       # Vault metadata descriptor (ID, name, version)
 ├── .vault_check.7z                 # Fast password verification canary
+├── import/                         # Drop-folder for off-site .7z mobile/remote imports
+│   └── README.txt                 # Step-by-step instructions for off-site importing
+├── imports.7z                      # Virtual Entry Point: Created automatically for imported files
 ├── photos.7z                       # Virtual Entry Point: Encrypted metadata.json
 ├── documents.7z                    # Virtual Entry Point: Encrypted metadata.json
 └── arc-data/                       # Store-mode AES-256 encrypted payload
@@ -157,7 +166,7 @@ MyVault/
 > - **Enabled (Default)**: Folders in `arc-data/` use random 12-character alphanumeric IDs (`K9mB3vXp8Q1L`), preventing anyone inspecting the raw storage from discovering your folder or file names.
 > - **Disabled**: Entry points and item folders in `arc-data/` retain their exact human-readable names (`photos/vacation.jpg/chunk_000.7z`), allowing you to easily browse the folder structure on disk while keeping all contents strictly AES-256 encrypted.
 
-- When viewing `photos` inside ArcVault, the application projects the virtual items seamlessly as single unified files and directories.
+- When viewing `photos` or `imports` inside ArcVault, the application projects the virtual items seamlessly as single unified files and directories.
 - `metadata.json` is automatically hidden from the user view.
 - Legacy V1 monolithic archives are automatically migrated to V2 chunked format upon opening.
 
@@ -165,7 +174,7 @@ MyVault/
 
 ## 🧪 Running Tests
 
-The test suite covers backend encryption, V2 chunking/shredding, atomic swapping, backup recovery, password validation, and GUI components:
+The test suite covers backend encryption, V2 chunking/shredding, atomic swapping, backup recovery, password validation, off-site file importing, and GUI components:
 
 ```bash
 .venv/bin/python3 -m unittest discover tests -v
@@ -196,5 +205,4 @@ ArcVault stands on the shoulders of giants. Special thanks and sincere gratitude
 - **[7-Zip](https://www.7-zip.org/) by Igor Pavlov** — The foundational archival and cryptographic engine behind ArcVault. Igor Pavlov's extraordinary work on 7-Zip provides the rock-solid store-mode AES-256 header and payload encryption (`-mx=0`, `-mhe=on`) that powers ArcVault's lightning-fast SSD throughput and universal vendor independence.
 - **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/) (Riverbank Computing & The Qt Company)** — The world-class desktop application framework providing the sleek modern UI, high-DPI Retina vector graphics, multi-threaded background workers, and cross-platform native feel.
 - **[Pygments](https://pygments.org/) by Georg Brandl & the Python Community** — The robust syntax-highlighting engine driving in-app code and text file previews across hundreds of programming and markup languages.
-- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.
-- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle ArcVault into standalone, portable native binaries across macOS, Windows, and Linux.
+- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.\n- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle ArcVault into standalone, portable native binaries across macOS, Windows, and Linux.
