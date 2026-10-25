@@ -11,11 +11,12 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, QSize, Qt, QUrl
-from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QMimeData, QPoint, QSize, Qt, QUrl
+from PyQt6.QtGui import QAction, QDesktopServices, QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QInputDialog,
     QMainWindow,

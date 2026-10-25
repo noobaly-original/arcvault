@@ -884,6 +884,34 @@ class TestVaultablesGUI(unittest.TestCase):
             delete_vault_password(vault_dir, vault_id=vault.metadata.vault_id)
 
 
+
+    def test_main_window_on_create_entry_point(self) -> None:
+        """Verify MainWindow._on_create_entry_point creates new entry point without NameError."""
+        from PyQt6.QtWidgets import QDialog
+        from vaultables.gui.vault_dialog import CreateEntryPointDialog
+        vault_dir = self.root_path / "ep_create_test_vault"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="EP Test Vault",
+            password="SecurePass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.vault = vault
+        win.sidebar.set_current_vault(vault)
+        win._update_toolbar_state()
+
+        with patch.object(CreateEntryPointDialog, "exec", return_value=QDialog.DialogCode.Accepted):
+            with patch.object(CreateEntryPointDialog, "get_entry_point_name", return_value="finance"):
+                with patch.object(CreateEntryPointDialog, "get_obfuscate_setting", return_value=True):
+                    win._on_create_entry_point()
+
+        self.assertIn("finance", win.vault.entry_points)
+        self.assertEqual(win.active_entry_point, "finance")
+        win.close()
+
+
 if __name__ == "__main__":
 
     unittest.main()
