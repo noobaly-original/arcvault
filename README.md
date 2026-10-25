@@ -1,6 +1,6 @@
 # 🛡️ Vaultables
 
-> *So I had no idea another python based project called ArcVault existed; so changing the project name from ArcVault to vaultables was the natural approach.*
+> *So I had no idea another python based project called ArcVault existed; so changing the project name from ArcVault to Vaultables was the natural approach.*
 
 **Vaultables** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
 
