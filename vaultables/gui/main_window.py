@@ -15,6 +15,7 @@ from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QPoint, QSize, Qt, QUrl
 from PyQt6.QtGui import QAction, QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QInputDialog,
     QMainWindow,
@@ -29,6 +30,11 @@ from PyQt6.QtWidgets import (
 )
 
 from vaultables.config import AppConfig
+from vaultables.core.credentials import (
+    delete_vault_password,
+    retrieve_vault_password,
+    store_vault_password,
+)
 from vaultables.core.models import ArchiveItem, FileCategory
 from vaultables.core.sevenzip import SevenZip, SevenZipExecutableNotFoundError
 from vaultables.core.vault import Vault
@@ -225,6 +231,18 @@ class MainWindow(QMainWindow):
         self.act_lock.triggered.connect(self.lock_vault)
         self.toolbar.addAction(self.act_lock)
 
+        self.toolbar.addSeparator()
+
+        self.chk_store_password = QCheckBox("Store Password", self)
+        self.chk_store_password.setToolTip(
+            "Store master vault password in secure OS credential manager (Keychain / DPAPI / Secret Service)"
+        )
+        self.chk_store_password.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_store_password.toggled.connect(self._on_store_password_toggled)
+        self.toolbar.addWidget(self.chk_store_password)
+
+        self.toolbar.addSeparator()
+
         self.act_logs = QAction("Vault Logs", self)
         self.act_logs.setToolTip("Toggle Vault Activity & 7-Zip Logs (Ctrl+L / Cmd+L)")
         self.act_logs.setShortcut(QKeySequence("Ctrl+L"))
@@ -261,6 +279,44 @@ class MainWindow(QMainWindow):
         self.act_lock.setEnabled(has_unlocked_vault)
         self.act_rename_vault.setEnabled(has_unlocked_vault)
         self.act_check_imports.setEnabled(has_unlocked_vault)
+
+        self.chk_store_password.setEnabled(has_unlocked_vault)
+        self.chk_store_password.blockSignals(True)
+        if has_unlocked_vault:
+            self.chk_store_password.setChecked(
+                self.config.is_password_saved(str(self.vault.root_dir))
+            )
+        else:
+            self.chk_store_password.setChecked(False)
+        self.chk_store_password.blockSignals(False)
+
+    def _on_store_password_toggled(self, checked: bool) -> None:
+        if not self.vault or not self.vault.is_unlocked:
+            return
+
+        vault_path = str(self.vault.root_dir)
+        vault_id = self.vault.metadata.vault_id if self.vault.metadata else None
+
+        if checked:
+            if self.vault.password:
+                success = store_vault_password(vault_path, self.vault.password, vault_id=vault_id)
+                if success:
+                    self.config.set_password_saved(vault_path, True)
+                    self.status_bar.showMessage("Master password securely saved in OS credential manager.", 4000)
+                else:
+                    self.chk_store_password.blockSignals(True)
+                    self.chk_store_password.setChecked(False)
+                    self.chk_store_password.blockSignals(False)
+                    self.config.set_password_saved(vault_path, False)
+                    QMessageBox.warning(
+                        self,
+                        "Credential Storage Failed",
+                        "Could not save master password to the OS credential manager. Please check system permissions.",
+                    )
+        else:
+            delete_vault_password(vault_path, vault_id=vault_id)
+            self.config.set_password_saved(vault_path, False)
+            self.status_bar.showMessage("Master password removed from OS credential manager.", 4000)
 
     def _apply_theme(self) -> None:
         qss = get_stylesheet(self.dark_mode)

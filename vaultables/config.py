@@ -124,3 +124,30 @@ class AppConfig:
                 self.known_vaults[0]["path"] if self.known_vaults else None
             )
         self.save()
+
+    def is_password_saved(self, vault_path: str) -> bool:
+        """Check if password storage is enabled for this vault in configuration."""
+        norm_path = str(Path(vault_path).resolve())
+        for item in self.known_vaults:
+            if str(Path(item.get("path", "")).resolve()) == norm_path:
+                return bool(item.get("store_password", False))
+        return False
+
+    def set_password_saved(self, vault_path: str, saved: bool) -> None:
+        """Set password storage preference for this vault."""
+        norm_path = str(Path(vault_path).resolve())
+        for item in self.known_vaults:
+            if str(Path(item.get("path", "")).resolve()) == norm_path:
+                item["store_password"] = bool(saved)
+                self.save()
+                return
+
+        self.known_vaults.insert(
+            0,
+            {
+                "path": norm_path,
+                "name": Path(vault_path).name,
+                "store_password": bool(saved),
+            },
+        )
+        self.save()

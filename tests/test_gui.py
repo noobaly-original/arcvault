@@ -795,6 +795,95 @@ class TestVaultablesGUI(unittest.TestCase):
         self.assertTrue(dlg_plain.get_obfuscate_setting())
         dlg_plain.close()
 
+
+    def test_toolbar_store_password_feature(self) -> None:
+        """Verify toolbar 'Store Password' checkbox toggles OS credential storage and persists state."""
+        from vaultables.core.credentials import (
+            delete_vault_password,
+            is_vault_password_stored,
+            retrieve_vault_password,
+        )
+
+        vault_dir = self.root_path / "cred_test_vault"
+        pwd = "MasterTestPassword77!"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="Cred Test Vault",
+            password=pwd,
+            initial_entry_points=["docs"],
+        )
+
+        try:
+            win = MainWindow(self.config, auto_unlock_last=False)
+            # Before vault is attached/unlocked, checkbox must be disabled
+            self.assertFalse(win.chk_store_password.isEnabled())
+            self.assertFalse(win.chk_store_password.isChecked())
+
+            # Attach unlocked vault
+            win.vault = vault
+            win._update_toolbar_state()
+            self.assertTrue(win.chk_store_password.isEnabled())
+            self.assertFalse(win.chk_store_password.isChecked())
+
+            # User checks "Store Password"
+            win.chk_store_password.setChecked(True)
+            self.assertTrue(self.config.is_password_saved(str(vault_dir)))
+            self.assertTrue(is_vault_password_stored(vault_dir))
+            self.assertEqual(retrieve_vault_password(vault_dir), pwd)
+
+            # User unchecks "Store Password"
+            win.chk_store_password.setChecked(False)
+            self.assertFalse(self.config.is_password_saved(str(vault_dir)))
+            self.assertFalse(is_vault_password_stored(vault_dir))
+            self.assertIsNone(retrieve_vault_password(vault_dir))
+
+            # Turn it back on and then lock vault -> checkbox disables and unchecks
+            win.chk_store_password.setChecked(True)
+            self.assertTrue(self.config.is_password_saved(str(vault_dir)))
+            win.lock_vault()
+            self.assertFalse(win.chk_store_password.isEnabled())
+            self.assertFalse(win.chk_store_password.isChecked())
+
+            win.close()
+        finally:
+            delete_vault_password(vault_dir)
+
+    def test_unlock_dialog_prefills_stored_password(self) -> None:
+        """Verify UnlockVaultDialog automatically pre-fills master password when saved in OS credential manager."""
+        from vaultables.core.credentials import (
+            delete_vault_password,
+            store_vault_password,
+        )
+        from vaultables.gui.vault_dialog import UnlockVaultDialog
+
+        vault_dir = self.root_path / "prefill_test_vault"
+        pwd = "AutoFillPassword88!"
+        vault = Vault.create_vault(
+            root_dir=vault_dir,
+            name="Prefill Test Vault",
+            password=pwd,
+            initial_entry_points=["docs"],
+        )
+
+        try:
+            # 1. When not stored, dialog field is empty
+            dlg1 = UnlockVaultDialog(vault)
+            self.assertEqual(dlg1.edit_password.text(), "")
+            self.assertFalse(dlg1.chk_store_password.isChecked())
+            dlg1.close()
+
+            # 2. Store password
+            store_vault_password(vault_dir, pwd, vault_id=vault.metadata.vault_id)
+
+            # 3. When stored, dialog pre-fills password and checks remember box
+            dlg2 = UnlockVaultDialog(vault)
+            self.assertEqual(dlg2.edit_password.text(), pwd)
+            self.assertTrue(dlg2.chk_store_password.isChecked())
+            dlg2.close()
+        finally:
+            delete_vault_password(vault_dir, vault_id=vault.metadata.vault_id)
+
+
 if __name__ == "__main__":
 
     unittest.main()

@@ -21,6 +21,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vaultables.config import AppConfig
+from vaultables.core.credentials import (
+    delete_vault_password,
+    retrieve_vault_password,
+    store_vault_password,
+)
 from vaultables.core.vault import Vault, VaultExistsError
 from vaultables.gui.icons import IconProvider
 from vaultables.gui.workers import UnlockWorker
@@ -36,7 +42,7 @@ class UnlockVaultDialog(QDialog):
         self.worker: Optional[UnlockWorker] = None
 
         self.setWindowTitle(f"Unlock Vault - {self.vault.metadata.name if self.vault.metadata else 'Vault'}")
-        self.setFixedSize(440, 290)
+        self.setFixedSize(440, 325)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
@@ -85,6 +91,23 @@ class UnlockVaultDialog(QDialog):
         pwd_layout.addWidget(self.btn_toggle_eye)
 
         layout.addWidget(pwd_container)
+
+        # Stored credential check
+        saved_pwd = retrieve_vault_password(
+            self.vault.root_dir,
+            vault_id=self.vault.metadata.vault_id if self.vault.metadata else None,
+        )
+        if saved_pwd:
+            self.edit_password.setText(saved_pwd)
+
+        self.chk_store_password = QCheckBox("Remember master password in OS credential manager", self)
+        self.chk_store_password.setChecked(bool(saved_pwd))
+        self.chk_store_password.setStyleSheet("font-size: 12px; color: #94a3b8;" if self.dark_mode else "font-size: 12px; color: #475569;")
+        self.chk_store_password.setToolTip(
+            "Securely store or remove the master password in your platform's native credential manager "
+            "(macOS Keychain, Windows DPAPI / Credential Manager, Linux Secret Service)"
+        )
+        layout.addWidget(self.chk_store_password)
 
         # Error / Status message banner
         self.lbl_status = QLabel("", self)
@@ -144,6 +167,16 @@ class UnlockVaultDialog(QDialog):
         self.edit_password.setEnabled(True)
 
         if success:
+            pwd = self.edit_password.text()
+            vault_path = str(self.vault.root_dir)
+            vault_id = self.vault.metadata.vault_id if self.vault.metadata else None
+            config = AppConfig()
+            if self.chk_store_password.isChecked():
+                store_vault_password(vault_path, pwd, vault_id=vault_id)
+                config.set_password_saved(vault_path, True)
+            else:
+                delete_vault_password(vault_path, vault_id=vault_id)
+                config.set_password_saved(vault_path, False)
             self.accept()
         else:
             self.lbl_status.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 500;")
@@ -163,7 +196,7 @@ class CreateVaultDialog(QDialog):
         self.created_vault_name: str = ""
 
         self.setWindowTitle("Create New Vault")
-        self.setFixedSize(500, 485)
+        self.setFixedSize(500, 520)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
@@ -257,6 +290,16 @@ class CreateVaultDialog(QDialog):
         lbl_obf_hint.setStyleSheet("color: #64748b; font-size: 11px; margin-left: 20px; margin-bottom: 4px;")
         layout.addWidget(lbl_obf_hint)
 
+        # Password Storage Checkbox
+        self.chk_store_password = QCheckBox("Remember master password in OS credential manager", self)
+        self.chk_store_password.setChecked(False)
+        self.chk_store_password.setStyleSheet("font-size: 12px; font-weight: 500; margin-top: 4px;")
+        self.chk_store_password.setToolTip(
+            "Securely store the master password in your platform's native credential manager "
+            "(macOS Keychain, Windows DPAPI / Credential Manager, Linux Secret Service)"
+        )
+        layout.addWidget(self.chk_store_password)
+
         # Error banner
         self.lbl_error = QLabel("", self)
         self.lbl_error.setStyleSheet("color: #ef4444; font-size: 12px;")
@@ -340,6 +383,9 @@ class CreateVaultDialog(QDialog):
             )
             self.created_vault_path = loc_path
             self.created_vault_name = name
+            if self.chk_store_password.isChecked():
+                store_vault_password(loc_path, pwd, vault_id=vault.metadata.vault_id if vault.metadata else None)
+                AppConfig().set_password_saved(str(loc_path), True)
             self.accept()
         except VaultExistsError as e:
             self._show_error(str(e))

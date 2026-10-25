@@ -249,6 +249,15 @@ QGroupBox::title {
     color: #38bdf8;
 }
 
+
+QCheckBox {
+    spacing: 6px;
+    color: #f8fafc;
+    font-size: 12px;
+}
+QCheckBox:disabled {
+    color: #64748b;
+}
 QLabel {
     color: #f8fafc;
 }
@@ -500,6 +509,15 @@ QGroupBox::title {
     color: #0284c7;
 }
 
+
+QCheckBox {
+    spacing: 6px;
+    color: #0f172a;
+    font-size: 12px;
+}
+QCheckBox:disabled {
+    color: #94a3b8;
+}
 QLabel {
     color: #0f172a;
 }

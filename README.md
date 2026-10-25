@@ -1,5 +1,7 @@
 # 🛡️ Vaultables
 
+> *So I had no idea another python based project called ArcVault existed; so changing the project name from ArcVault to vaultables was the natural approach.*
+
 **Vaultables** is a fast, lightweight, and cross-platform encrypted archive explorer, editor, and vault utility.
 
 Unlike traditional vault systems (such as Cryptomator) that rely on complex virtual drive drivers (MacFUSE, WinFsp, or WebDAV loops), **Vaultables** takes a clean, file-centric approach:
@@ -16,6 +18,10 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
 - **Portable Onefile Executables & USB Mode**:
   - Run Vaultables as a single, self-contained portable executable on **Windows** (`Vaultables.exe`), **Linux** (`Vaultables`), and **macOS** (`Vaultables` & `Vaultables.app`).
   - **USB Drive Portable**: If 7-Zip is not installed system-wide on the host computer, simply drop `7z.exe` / `7zz` in the same directory as Vaultables, and the app detects it automatically.
+- **Native OS Credential Manager Integration (Keychain, DPAPI, Secret Service)**:
+  - Securely store and retrieve vault master passwords using platform-native security APIs (**Apple Keychain** on macOS, **Windows Credential Manager / DPAPI** on Windows, and **GNOME Keyring / KDE Wallet** on Linux via Secret Service).
+  - Quick-toggle checkbox directly on the toolbar and unlock dialogs to remember or delete master passwords from the OS credential store at any time.
+  - Formatted strictly with application scoping (`vaultables:{main_password}`) to prevent credential collisions across systems.
 - **Off-Site File Importer (`import/` ➔ `imports`)**:
   - **File Liberation on Mobile & Remote Devices**: Import files without needing Vaultables installed (iPhone, iPad, Android, or secondary PCs).
   - **Drop-Folder Workflow**: Compress files or folders into a standard `.7z` archive using your vault's master password (via mobile apps like Keka or iZip, or 7-Zip, NanaZip, PeaZip) and drop them into the vault's `import/` folder (via iCloud, Google Drive, Nextcloud, Dropbox, AirDrop, or USB).
@@ -40,7 +46,8 @@ Unlike traditional vault systems (such as Cryptomator) that rely on complex virt
   - Metadata saves are staged in isolated temp storage and atomically committed with `os.replace`, completely preventing file-lock sharing violations with Google Drive, MEGA, OneDrive, or Dropbox sync daemons.
   - Version fallback backups (`.{entry_point}.bak`) are automatically retained and used if an archive is ever corrupted.
 - **Vault Nesting Safeguards**:
-  - Vaultables actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.vaultables`) from active vault stores.\n- **Deep Recursive Multi-Archive Search**:
+  - Vaultables actively inspects directory trees before vault creation to prevent accidental nesting inside existing vaults, protecting metadata integrity while strictly distinguishing user configuration folders (`~/.vaultables`) from active vault stores.
+- **Deep Recursive Multi-Archive Search**:
   - Search across all virtual entry points and nested subfolders simultaneously in milliseconds.
   - Flexible scope selection: **Entire Vault (Recursive)**, **Current Archive (Recursive)**, or **Current Folder**.
   - Supports wildcard patterns (`*.png`, `*report*`, `invoice_??.pdf`) and substring text matching.
@@ -204,5 +211,7 @@ Vaultables stands on the shoulders of giants. Special thanks and sincere gratitu
 
 - **[7-Zip](https://www.7-zip.org/) by Igor Pavlov** — The foundational archival and cryptographic engine behind Vaultables. Igor Pavlov's extraordinary work on 7-Zip provides the rock-solid store-mode AES-256 header and payload encryption (`-mx=0`, `-mhe=on`) that powers Vaultables's lightning-fast SSD throughput and universal vendor independence.
 - **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/) (Riverbank Computing & The Qt Company)** — The world-class desktop application framework providing the sleek modern UI, high-DPI Retina vector graphics, multi-threaded background workers, and cross-platform native feel.
+- **[keyring](https://github.com/jaraco/keyring) by Jason R. Coombs & contributors** — The cross-platform secure credential storage library providing seamless OS-native password integration (Apple Keychain, Windows DPAPI / Credential Manager, Linux Secret Service).
 - **[Pygments](https://pygments.org/) by Georg Brandl & the Python Community** — The robust syntax-highlighting engine driving in-app code and text file previews across hundreds of programming and markup languages.
-- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.\n- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle Vaultables into standalone, portable native binaries across macOS, Windows, and Linux.
+- **[Pillow (PIL Fork)](https://python-pillow.org/) by Jeffrey A. Clark (Alex) & contributors** — The premier imaging library powering high-performance image decoding, aspect ratio preservation, smooth scaling, and dimensional inspection.
+- **[PyInstaller](https://pyinstaller.org/) by David Cortesi & the PyInstaller development team** — The industry-standard packaging tool used to bundle Vaultables into standalone, portable native binaries across macOS, Windows, and Linux.
