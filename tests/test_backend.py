@@ -656,5 +656,100 @@ class TestArcVaultBackend(unittest.TestCase):
         reopened = Vault(vault_dir, self.sz)
         self.assertEqual(reopened.name, "Custom Secret Vault")
 
+    def test_offsite_file_importer(self) -> None:
+        """Verify off-site file importer processes encrypted 7z files in import/ and populates 'imports' entry point."""
+        vault_dir = self.root_path / "offsite_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="Offsite Vault",
+            password=self.password,
+            sevenzip=self.sz,
+        )
+
+        # 1. Verify import folder was created
+        self.assertTrue(vault.import_dir.is_dir())
+        self.assertTrue((vault.import_dir / "README.txt").is_file())
+
+        # 2. Stage offsite files created outside the vault
+        offsite_stage = self.root_path / "offsite_creator"
+        offsite_stage.mkdir()
+
+        # Archive 1: Single file notes.7z (encrypted with vault password)
+        note_file = offsite_stage / "quick_note.txt"
+        note_file.write_text("Secret offsite note content", encoding="utf-8")
+        note_7z = vault.import_dir / "notes.7z"
+        self.assertTrue(self.sz.add_files(note_7z, [note_file], self.password))
+
+        # Archive 2: Nested folder photos.7z (encrypted with vault password)
+        photo_dir = offsite_stage / "travel"
+        photo_dir.mkdir()
+        (photo_dir / "sunset.jpg").write_bytes(b"sunset_image_bytes")
+        photos_7z = vault.import_dir / "photos.7z"
+        self.assertTrue(self.sz.add_files(photos_7z, [photo_dir], self.password))
+
+        # Archive 3: Encrypted with WRONG password
+        wrong_file = offsite_stage / "wrong.txt"
+        wrong_file.write_text("wrong pass", encoding="utf-8")
+        wrong_7z = vault.import_dir / "wrong.7z"
+        self.assertTrue(self.sz.add_files(wrong_7z, [wrong_file], "WrongPassword123!"))
+
+        # Non-7z file in import folder
+        random_file = vault.import_dir / "notes.txt"
+        random_file.write_text("plain text", encoding="utf-8")
+
+        # 3. Process pending imports
+        imported_count = vault.process_pending_imports()
+        self.assertEqual(imported_count, 2)
+
+        # 4. Valid archives should be removed from import/, while wrong password and non-7z should stay
+        self.assertFalse(note_7z.exists())
+        self.assertFalse(photos_7z.exists())
+        self.assertTrue(wrong_7z.exists())
+        self.assertTrue(random_file.exists())
+
+        # 5. 'imports' entry point was created and populated
+        self.assertIn("imports", vault.entry_points)
+        items = vault.get_items_in_directory("imports", "")
+        item_names = [i.name for i in items]
+        self.assertIn("quick_note.txt", item_names)
+        self.assertIn("travel", item_names)
+
+        # Verify nested item inside travel
+        travel_items = vault.get_items_in_directory("imports", "travel")
+        self.assertEqual(len(travel_items), 1)
+        self.assertEqual(travel_items[0].name, "sunset.jpg")
+
+        # Verify preview extraction of imported files
+        preview_note = vault.extract_file_for_preview("imports", "quick_note.txt")
+        self.assertIsNotNone(preview_note)
+        self.assertEqual(preview_note.read_text(encoding="utf-8"), "Secret offsite note content")
+
+        preview_img = vault.extract_file_for_preview("imports", "travel/sunset.jpg")
+        self.assertIsNotNone(preview_img)
+        self.assertEqual(preview_img.read_bytes(), b"sunset_image_bytes")
+
+        # 6. Test automatic import on unlock()
+        vault.lock()
+        self.assertFalse(vault.is_unlocked)
+
+        # Drop another valid archive into import/
+        doc_file = offsite_stage / "extra.pdf"
+        doc_file.write_bytes(b"pdf_document_bytes")
+        extra_7z = vault.import_dir / "extra.7z"
+        self.assertTrue(self.sz.add_files(extra_7z, [doc_file], self.password))
+
+        # Reopen and unlock vault
+        reopened = Vault(vault_dir, self.sz)
+        unlocked = reopened.unlock(self.password)
+        self.assertTrue(unlocked)
+        self.assertEqual(reopened.last_imported_count, 1)
+        self.assertFalse(extra_7z.exists())
+
+        # Check that 'imports' contains both previous items and new item
+        reopened_items = [i.name for i in reopened.get_items_in_directory("imports", "")]
+        self.assertIn("quick_note.txt", reopened_items)
+        self.assertIn("travel", reopened_items)
+        self.assertIn("extra.pdf", reopened_items)
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,8 @@ class Vault:
     MARKER_FILENAME = ".arcvault"
     CHECK_FILENAME = ".vault_check.7z"
     ARC_DATA_DIRNAME = "arc-data"
+    IMPORT_DIRNAME = "import"
+    IMPORTS_ENTRY_POINT_NAME = "imports"
 
     @classmethod
     def is_vault_dir(cls, directory: Path) -> bool:
@@ -110,6 +112,9 @@ class Vault:
         self.chunk_size = chunk_size
         self.v2_engine = V2StorageEngine(self.sevenzip, chunk_size=chunk_size)
         self.arc_data_dir = self.root_dir / self.ARC_DATA_DIRNAME
+        self.import_dir = self.root_dir / self.IMPORT_DIRNAME
+        self.last_imported_count: int = 0
+        self._is_importing: bool = False
 
         self.metadata: Optional[VaultMetadata] = None
         self._password: Optional[str] = None
@@ -238,6 +243,21 @@ class Vault:
         root_dir.mkdir(parents=True, exist_ok=True)
         arc_data = root_dir / cls.ARC_DATA_DIRNAME
         arc_data.mkdir(parents=True, exist_ok=True)
+        import_dir = root_dir / cls.IMPORT_DIRNAME
+        import_dir.mkdir(parents=True, exist_ok=True)
+        readme = import_dir / "README.txt"
+        if not readme.exists():
+            try:
+                readme_msg = (
+                    "ArcVault Off-site Import Folder\n"
+                    "================================\n"
+                    "Drop encrypted .7z archives here created with your vault master password.\n"
+                    "When ArcVault launches or refreshes, it will automatically decrypt, chunk, and\n"
+                    "incorporate these files into the 'imports' entry point, keeping them safely encrypted.\n"
+                )
+                readme.write_text(readme_msg, encoding="utf-8")
+            except Exception:
+                pass
 
         vault_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
@@ -300,6 +320,11 @@ class Vault:
 
         self._password = password
         self.is_unlocked = True
+        try:
+            self.import_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        self.last_imported_count = self.process_pending_imports()
         self.refresh_entry_points()
         vault_title = self.metadata.name if self.metadata else self.root_dir.name
         log_info(f"Vault unlocked: '{vault_title}' ({len(self.entry_points)} entry points)", category="SECURITY")
@@ -310,6 +335,8 @@ class Vault:
         vault_title = self.metadata.name if self.metadata else self.root_dir.name
         self._password = None
         self.is_unlocked = False
+        self.last_imported_count = 0
+        self._is_importing = False
         self.entry_points.clear()
         self._v2_metadata.clear()
         self._cache.clear()
@@ -343,10 +370,114 @@ class Vault:
             self._edit_staging_dir = tempfile.TemporaryDirectory(prefix="arcvault_watched_edit_")
         return Path(self._edit_staging_dir.name)
 
+    def process_pending_imports(self) -> int:
+        """
+        Check the 'import/' folder for off-site encrypted .7z archives.
+        Validates each archive against the vault master password.
+        Extracts the contents to an isolated temporary staging folder,
+        then securely incorporates and encrypts them into the 'imports' entry point.
+        Removes successfully imported archives from 'import/'.
+        Returns the number of archives successfully imported.
+        """
+        if not self.is_unlocked or self._is_importing:
+            return 0
+
+        if not self.import_dir.exists() or not self.import_dir.is_dir():
+            try:
+                self.import_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                return 0
+            return 0
+
+        archives = [
+            f for f in sorted(self.import_dir.glob("*.7z"))
+            if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
+        ]
+        if not archives:
+            return 0
+
+        self._is_importing = True
+        imported_count = 0
+
+        try:
+            for archive_file in archives:
+                # 1. Validate: Must test successfully with the vault master password
+                if not self.sevenzip.test_archive(archive_file, self.password):
+                    log_warning(
+                        f"Offsite import: Skipping '{archive_file.name}' - invalid archive or not encrypted with vault master password.",
+                        category="SECURITY",
+                    )
+                    continue
+
+                # 2. Ensure 'imports' entry point exists
+                if self.IMPORTS_ENTRY_POINT_NAME not in self.entry_points:
+                    ep_file = self.root_dir / f"{self.IMPORTS_ENTRY_POINT_NAME}.7z"
+                    if not ep_file.exists():
+                        self.create_entry_point(self.IMPORTS_ENTRY_POINT_NAME)
+                    else:
+                        meta = self._load_or_migrate_entry_point(self.IMPORTS_ENTRY_POINT_NAME, ep_file)
+                        self._v2_metadata[self.IMPORTS_ENTRY_POINT_NAME] = meta
+                        self.entry_points[self.IMPORTS_ENTRY_POINT_NAME] = EntryPoint(
+                            name=self.IMPORTS_ENTRY_POINT_NAME,
+                            archive_file=ep_file,
+                            size_on_disk=ep_file.stat().st_size,
+                        )
+
+                # 3. Stage extraction in a secure temporary directory with a randomly named folder
+                with tempfile.TemporaryDirectory(prefix="arc_offsite_import_") as tmp_dir:
+                    random_stage = Path(tmp_dir) / f"stage_{uuid.uuid4().hex[:8]}"
+                    random_stage.mkdir(parents=True, exist_ok=True)
+
+                    log_info(
+                        f"Offsite import: Extracting '{archive_file.name}' to staging area...",
+                        category="SECURITY",
+                    )
+                    success = self.sevenzip.extract_to_destination(archive_file, [], self.password, random_stage)
+                    if not success:
+                        log_warning(
+                            f"Offsite import: Failed to extract '{archive_file.name}'. Leaving file in import folder.",
+                            category="SECURITY",
+                        )
+                        continue
+
+                    extracted_items = [
+                        p for p in random_stage.iterdir()
+                        if p.name not in (".arcvault_init", METADATA_FILENAME)
+                    ]
+
+                    # 4. Incorporate into 'imports' entry point
+                    if extracted_items:
+                        self.add_files(self.IMPORTS_ENTRY_POINT_NAME, extracted_items)
+
+                # 5. Extraction and incorporation succeeded - clean up source archive from import folder
+                try:
+                    archive_file.unlink()
+                    imported_count += 1
+                    log_info(
+                        f"Offsite import: Successfully imported '{archive_file.name}' into '{self.IMPORTS_ENTRY_POINT_NAME}' entry point.",
+                        category="SECURITY",
+                    )
+                except Exception as e:
+                    log_warning(f"Offsite import: Could not delete processed archive '{archive_file.name}': {e}")
+        finally:
+            self._is_importing = False
+
+        return imported_count
+
     def refresh_entry_points(self) -> Dict[str, EntryPoint]:
         """Scan vault root for .7z files and load V2 metadata."""
         if not self.is_unlocked:
             return {}
+
+        # Auto-process pending off-site imports if any exist
+        if not self._is_importing and self.import_dir.exists():
+            has_7z = any(
+                f.is_file() and not f.name.startswith(".") and not f.name.endswith(".bak")
+                for f in self.import_dir.glob("*.7z")
+            )
+            if has_7z:
+                imported = self.process_pending_imports()
+                self.last_imported_count += imported
 
         self.entry_points.clear()
         for file in sorted(self.root_dir.glob("*.7z")):
@@ -773,6 +904,10 @@ class Vault:
         rel_path = f"{target_subfolder}/{clean_name}".strip("/") if target_subfolder else clean_name
 
         if self.obfuscate_names:
+            if rel_path in meta.items and meta.items[rel_path].item_id:
+                old_dir = ep_data_dir / meta.items[rel_path].item_id
+                if old_dir.exists():
+                    shutil.rmtree(old_dir, ignore_errors=True)
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:

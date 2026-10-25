@@ -717,5 +717,50 @@ class TestArcVaultGUI(unittest.TestCase):
         self.assertTrue(found_in_sidebar)
         win.close()
 
+    def test_check_imports_in_gui(self) -> None:
+        """Verify 'Check Imports' toolbar action processes off-site files and prompts user."""
+        from PyQt6.QtWidgets import QMessageBox
+        from arc_vault.core.sevenzip import SevenZip
+        from arc_vault.gui.main_window import MainWindow
+
+        vault_dir = self.root_path / "gui_import_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="GUI Import Vault",
+            password="ImportPass123!",
+            initial_entry_points=["docs"],
+        )
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+        win.vault = vault
+        win.sidebar.set_current_vault(vault)
+        win._update_toolbar_state()
+        self.assertTrue(win.act_check_imports.isEnabled())
+
+        # 1. No pending archives -> shows information prompt
+        with patch.object(QMessageBox, "information", return_value=QMessageBox.StandardButton.Cancel) as mock_info:
+            win._on_check_imports_action()
+            mock_info.assert_called_once()
+            self.assertIn("No pending encrypted .7z", mock_info.call_args[0][2])
+
+        # 2. Stage a 7z archive in import_dir
+        sz = SevenZip()
+        sample = self.root_path / "offsite_doc.txt"
+        sample.write_text("content from offsite device", encoding="utf-8")
+        archive_7z = vault.import_dir / "offsite.7z"
+        sz.add_files(archive_7z, [sample], "ImportPass123!")
+        self.assertTrue(archive_7z.exists())
+
+        # 3. Trigger check imports -> successfully imports and informs user
+        with patch.object(QMessageBox, "information") as mock_info_success:
+            win._on_check_imports_action()
+            mock_info_success.assert_called_once()
+            self.assertIn("Successfully imported 1 archive(s)", mock_info_success.call_args[0][2])
+
+        self.assertFalse(archive_7z.exists())
+        self.assertIn("imports", win.vault.entry_points)
+        self.assertIn("Imported 1 off-site archive(s)", win.status_bar.currentMessage())
+        win.close()
+
 if __name__ == "__main__":
     unittest.main()

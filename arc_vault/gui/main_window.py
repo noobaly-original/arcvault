@@ -210,6 +210,11 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator()
 
+        self.act_check_imports = QAction("Check Imports", self)
+        self.act_check_imports.setToolTip("Process off-site encrypted .7z files from the vault's 'import/' folder")
+        self.act_check_imports.triggered.connect(self._on_check_imports_action)
+        self.toolbar.addAction(self.act_check_imports)
+
         self.act_rename_vault = QAction("Rename Vault", self)
         self.act_rename_vault.setToolTip("Rename vault display name")
         self.act_rename_vault.triggered.connect(lambda: self._on_rename_vault_display_name(self.vault.root_dir if self.vault else None))
@@ -255,6 +260,7 @@ class MainWindow(QMainWindow):
         self.act_delete.setEnabled(has_unlocked_vault)
         self.act_lock.setEnabled(has_unlocked_vault)
         self.act_rename_vault.setEnabled(has_unlocked_vault)
+        self.act_check_imports.setEnabled(has_unlocked_vault)
 
     def _apply_theme(self) -> None:
         qss = get_stylesheet(self.dark_mode)
@@ -265,6 +271,7 @@ class MainWindow(QMainWindow):
         self.act_new_folder.setIcon(IconProvider.get_icon("plus", dark_mode=self.dark_mode, size=20))
         self.act_export.setIcon(IconProvider.get_icon("export", dark_mode=self.dark_mode, size=20))
         self.act_delete.setIcon(IconProvider.get_icon("trash", dark_mode=self.dark_mode, size=20))
+        self.act_check_imports.setIcon(IconProvider.get_icon("archive", dark_mode=self.dark_mode, size=20))
         self.act_rename_vault.setIcon(IconProvider.get_icon("edit", dark_mode=self.dark_mode, size=20))
         self.act_lock.setIcon(IconProvider.get_icon("vault", dark_mode=self.dark_mode, size=20))
         self.act_logs.setIcon(IconProvider.get_icon("logs", dark_mode=self.dark_mode, size=20))
@@ -345,9 +352,10 @@ class MainWindow(QMainWindow):
                 self.active_entry_point = ""
                 self.current_subfolder = ""
                 self.refresh_current_view()
-                self.status_bar.showMessage(
-                    f"Vault '{self.vault.metadata.name if self.vault.metadata else 'Vault'}' unlocked."
-                )
+                msg = f"Vault '{self.vault.metadata.name if self.vault.metadata else 'Vault'}' unlocked."
+                if getattr(self.vault, "last_imported_count", 0) > 0:
+                    msg += f" Imported {self.vault.last_imported_count} off-site archive(s) into 'imports'."
+                self.status_bar.showMessage(msg)
             else:
                 self.lock_vault()
 
@@ -379,6 +387,39 @@ class MainWindow(QMainWindow):
                 self.sidebar.set_current_vault(self.vault)
                 self._update_toolbar_state()
                 self.refresh_current_view()
+
+    def _on_check_imports_action(self) -> None:
+        """Scan and import off-site .7z files from the vault's import/ folder."""
+        if not self.vault or not self.vault.is_unlocked:
+            return
+
+        count = self.vault.process_pending_imports()
+        if count > 0:
+            self.refresh_current_view()
+            self.status_bar.showMessage(f"Imported {count} off-site archive(s) into 'imports'.")
+            QMessageBox.information(
+                self,
+                "Off-site Import",
+                f"Successfully imported {count} archive(s) from the 'import/' folder into 'imports'.",
+            )
+        else:
+            msg = (
+                "No pending encrypted .7z archives were found in the 'import/' folder.\n\n"
+                "To import files from other devices, compress them with 7z using your vault password, "
+                "drop the .7z files into the 'import/' folder, and click 'Check Imports'.\n\n"
+                "Open 'import/' folder in file manager now?"
+            )
+            res = QMessageBox.information(
+                self,
+                "Off-site Import",
+                msg,
+                QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+            )
+            if res == QMessageBox.StandardButton.Open:
+                from PyQt6.QtCore import QUrl
+                from PyQt6.QtGui import QDesktopServices
+                self.vault.import_dir.mkdir(parents=True, exist_ok=True)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.vault.import_dir.resolve())))
 
     def _on_open_existing_vault(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Existing Vault Folder", str(Path.home()))
