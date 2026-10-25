@@ -31,6 +31,20 @@ DEFAULT_CHUNK_SIZE: int = 1024 * 1024 * 1024
 METADATA_FILENAME: str = "metadata.json"
 
 
+def sanitize_unobfuscated_folder_name(name_or_path: str) -> str:
+    """
+    Format a relative path or folder name for unobfuscated storage in vaultables-data/.
+    Replaces all '.' characters with '-' across each segment so disk folder names never contain dots.
+    For example: 'notes.txt' -> 'notes-txt', 'work/report.pdf' -> 'work/report-pdf'.
+    """
+    clean = name_or_path.strip("/").replace(chr(92), "/")
+    if not clean:
+        return ""
+    parts = clean.split("/")
+    sanitized_parts = [p.replace(".", "-") for p in parts]
+    return "/".join(sanitized_parts)
+
+
 def generate_random_id(length: int = 12) -> str:
     """Generate a random alphanumeric ID (letters and digits only)."""
     alphabet = string.ascii_letters + string.digits
@@ -124,7 +138,8 @@ class V2EntryPointMetadata:
         if self.obfuscate_names is not None:
             return bool(self.obfuscate_names)
         if self.ep_dir_id:
-            return self.ep_dir_id != self.entry_point_name
+            sanitized_ep = sanitize_unobfuscated_folder_name(self.entry_point_name)
+            return self.ep_dir_id != self.entry_point_name and self.ep_dir_id != sanitized_ep
         return default_vault_setting
 
     def to_json(self) -> str:
@@ -177,7 +192,7 @@ class V2StorageEngine:
         if obfuscate_names:
             ep_dir_id = generate_unique_folder_id(arc_data_root, 12)
         else:
-            ep_dir_id = entry_point_name
+            ep_dir_id = sanitize_unobfuscated_folder_name(entry_point_name)
         ep_data_dir = arc_data_root / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -344,6 +359,7 @@ class V2StorageEngine:
             f"-p{password}",
             "-y",
             str(chunk_archive_file.resolve()),
+            "--",
             source_data_file.name,
         ]
         res = self.sevenzip._run(cmd, cwd=source_data_file.parent)

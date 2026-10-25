@@ -502,9 +502,9 @@ class TestVaultablesBackend(unittest.TestCase):
         f1.write_text("plain notes", encoding="utf-8")
         vault.add_files("documents", [f1])
 
-        # File chunk should be under vaultables-data/documents/notes.txt/chunk_000.7z
-        self.assertEqual(meta.items["notes.txt"].item_id, "notes.txt")
-        self.assertTrue((ep_data_dir / "notes.txt" / "chunk_000.7z").is_file())
+        # File chunk should be under vaultables-data/documents/notes-txt/chunk_000.7z (dots replaced with dashes)
+        self.assertEqual(meta.items["notes.txt"].item_id, "notes-txt")
+        self.assertTrue((ep_data_dir / "notes-txt" / "chunk_000.7z").is_file())
 
         # 3. Create subfolder "work" and add file
         vault.create_subfolder("documents", "", "work")
@@ -515,8 +515,8 @@ class TestVaultablesBackend(unittest.TestCase):
         vault.add_files("documents", [f2], subfolder="work")
 
         meta = vault._v2_metadata["documents"]
-        self.assertEqual(meta.items["work/report.pdf"].item_id, "work/report.pdf")
-        self.assertTrue((ep_data_dir / "work" / "report.pdf" / "chunk_000.7z").is_file())
+        self.assertEqual(meta.items["work/report.pdf"].item_id, "work/report-pdf")
+        self.assertTrue((ep_data_dir / "work" / "report-pdf" / "chunk_000.7z").is_file())
 
         # 4. Preview and extraction work correctly
         preview = vault.extract_file_for_preview("documents", "work/report.pdf")
@@ -525,9 +525,9 @@ class TestVaultablesBackend(unittest.TestCase):
 
         # 5. Rename item renames folder on disk
         self.assertTrue(vault.rename_item("documents", "work/report.pdf", "work/final.pdf"))
-        self.assertEqual(meta.items["work/final.pdf"].item_id, "work/final.pdf")
-        self.assertTrue((ep_data_dir / "work" / "final.pdf" / "chunk_000.7z").is_file())
-        self.assertFalse((ep_data_dir / "work" / "report.pdf").exists())
+        self.assertEqual(meta.items["work/final.pdf"].item_id, "work/final-pdf")
+        self.assertTrue((ep_data_dir / "work" / "final-pdf" / "chunk_000.7z").is_file())
+        self.assertFalse((ep_data_dir / "work" / "report-pdf").exists())
 
         # 6. Export works
         dest_dir = self.root_path / "exported_plain"
@@ -693,6 +693,10 @@ class TestVaultablesBackend(unittest.TestCase):
         wrong_7z = vault.import_dir / "wrong.7z"
         self.assertTrue(self.sz.add_files(wrong_7z, [wrong_file], "WrongPassword123!"))
 
+        # Incomplete / half-downloaded cloud file (.7z with incomplete header/bytes)
+        partial_7z = vault.import_dir / "incomplete_download.7z"
+        partial_7z.write_bytes(b"7z_partial_half_downloaded_bytes")
+
         # Non-7z file in import folder
         random_file = vault.import_dir / "notes.txt"
         random_file.write_text("plain text", encoding="utf-8")
@@ -701,10 +705,11 @@ class TestVaultablesBackend(unittest.TestCase):
         imported_count = vault.process_pending_imports()
         self.assertEqual(imported_count, 2)
 
-        # 4. Valid archives should be removed from import/, while wrong password and non-7z should stay
+        # 4. Valid archives should be removed from import/, while wrong password, half-downloaded cloud file, and non-7z should stay untouched
         self.assertFalse(note_7z.exists())
         self.assertFalse(photos_7z.exists())
         self.assertTrue(wrong_7z.exists())
+        self.assertTrue(partial_7z.exists())
         self.assertTrue(random_file.exists())
 
         # 5. 'imports' entry point was created and populated
@@ -769,9 +774,9 @@ class TestVaultablesBackend(unittest.TestCase):
 
         imported_nested = reopened.process_pending_imports()
         self.assertEqual(imported_nested, 1)
-        # Both archive AND the containing folder inside import/ must be deleted
+        # Archive inside import/ is deleted, but containing folders and unimported files remain untouched
         self.assertFalse(nested_7z.exists())
-        self.assertFalse(nested_subfolder.exists())
+        self.assertTrue(nested_subfolder.exists())
         self.assertTrue((reopened.import_dir / "README.txt").is_file())
 
         # 9. Verify obfuscation respected when vault has obfuscate_names=False
@@ -792,10 +797,10 @@ class TestVaultablesBackend(unittest.TestCase):
         plain_count = plain_vault.process_pending_imports()
         self.assertEqual(plain_count, 1)
         self.assertFalse(plain_7z.exists())
-        # In unobfuscated vault, vaultables-data/imports/plain_doc.txt/chunk_000.7z must exist directly
+        # In unobfuscated vault, vaultables-data/imports/plain_doc-txt/chunk_000.7z must exist (no dots in folder names)
         plain_meta = plain_vault._v2_metadata["imports"]
         self.assertEqual(plain_meta.ep_dir_id, "imports")
-        self.assertTrue((plain_vault.arc_data_dir / "imports" / "plain_doc.txt" / "chunk_000.7z").is_file())
+        self.assertTrue((plain_vault.arc_data_dir / "imports" / "plain_doc-txt" / "chunk_000.7z").is_file())
 
 
     def test_on_demand_obfuscation(self) -> None:
@@ -833,9 +838,9 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertFalse(meta_readable.is_obfuscated(obf_vault.obfuscate_names))
         self.assertFalse(meta_readable.obfuscate_names)
 
-        # Add file to readable_ep and verify human-readable path under vaultables-data/
+        # Add file to readable_ep and verify human-readable path under vaultables-data/ (no dots in folder names)
         obf_vault.add_files("readable_ep", [test_file])
-        expected_chunk = obf_vault.arc_data_dir / "readable_ep" / "ondemand_sample.txt" / "chunk_000.7z"
+        expected_chunk = obf_vault.arc_data_dir / "readable_ep" / "ondemand_sample-txt" / "chunk_000.7z"
         self.assertTrue(expected_chunk.is_file())
 
         # Test subfolder in readable_ep
@@ -844,7 +849,7 @@ class TestVaultablesBackend(unittest.TestCase):
 
         # Rename file in readable_ep
         obf_vault.rename_item("readable_ep", "ondemand_sample.txt", "renamed_sample.txt")
-        renamed_chunk = obf_vault.arc_data_dir / "readable_ep" / "renamed_sample.txt" / "chunk_000.7z"
+        renamed_chunk = obf_vault.arc_data_dir / "readable_ep" / "renamed_sample-txt" / "chunk_000.7z"
         self.assertTrue(renamed_chunk.is_file())
         self.assertFalse(expected_chunk.exists())
 

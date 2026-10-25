@@ -22,6 +22,7 @@ from vaultables.core.storage_v2 import (
     V2StorageEngine,
     generate_random_id,
     generate_unique_folder_id,
+    sanitize_unobfuscated_folder_name,
 )
 from vaultables.logger import log_info, log_warning
 
@@ -504,15 +505,9 @@ class Vault:
                 except Exception as e:
                     log_warning(f"Offsite import: Could not delete processed archive '{archive_file.name}': {e}")
 
-            # 6. Clean up any empty subdirectories or processed folders inside import/
-            for sub in sorted(self.import_dir.rglob("*"), reverse=True):
-                if sub.is_dir() and sub.resolve() != self.import_dir.resolve():
-                    remaining = [p for p in sub.iterdir() if p.name not in ("README.txt", ".DS_Store")]
-                    if not remaining:
-                        try:
-                            shutil.rmtree(sub, ignore_errors=True)
-                        except Exception:
-                            pass
+            # 6. Safe import cleanup: Do NOT purge any folders or unimported files in import/
+            # Incomplete cloud downloads, unencrypted files, wrong-password archives, and any subdirectories
+            # are strictly preserved untouched so no data or in-progress files are ever accidentally lost.
         finally:
             self._is_importing = False
 
@@ -573,7 +568,7 @@ class Vault:
         if self.obfuscate_names:
             ep_dir_id = generate_unique_folder_id(self.arc_data_dir, 12)
         else:
-            ep_dir_id = ep_name
+            ep_dir_id = sanitize_unobfuscated_folder_name(ep_name)
         ep_data_dir = self.arc_data_dir / ep_dir_id
         ep_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -598,7 +593,7 @@ class Vault:
                         used_ids = {it.item_id for it in meta.items.values() if it.item_id}
                         item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
                     else:
-                        item_id = clean_path
+                        item_id = sanitize_unobfuscated_folder_name(clean_path)
 
                     if item.is_dir:
                         meta.items[clean_path] = V2ItemMetadata(
@@ -719,10 +714,11 @@ class Vault:
             is_obf = meta.is_obfuscated(self.obfuscate_names)
             if not is_obf:
                 old_ep_dir = self.arc_data_dir / meta.ep_dir_id
-                new_ep_dir = self.arc_data_dir / clean_new
+                sanitized_new = sanitize_unobfuscated_folder_name(clean_new)
+                new_ep_dir = self.arc_data_dir / sanitized_new
                 if old_ep_dir.exists():
                     old_ep_dir.rename(new_ep_dir)
-                meta.ep_dir_id = clean_new
+                meta.ep_dir_id = sanitized_new
             self.v2_engine.save_metadata(new_file, meta, self.password)
             self._v2_metadata[clean_new] = meta
 
@@ -972,7 +968,7 @@ class Vault:
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:
-            item_id = rel_path
+            item_id = sanitize_unobfuscated_folder_name(rel_path)
 
         item_dir = ep_data_dir / item_id
         if not is_obf and item_dir.exists():
@@ -1016,7 +1012,7 @@ class Vault:
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:
-            folder_item_id = rel_dir_path
+            folder_item_id = sanitize_unobfuscated_folder_name(rel_dir_path)
 
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
         mod_time = datetime.fromtimestamp(source_dir.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
@@ -1051,7 +1047,7 @@ class Vault:
             used_ids = {it.item_id for it in meta.items.values() if it.item_id}
             folder_item_id = generate_unique_folder_id(ep_data_dir, 12, existing_ids=used_ids)
         else:
-            folder_item_id = target_path
+            folder_item_id = sanitize_unobfuscated_folder_name(target_path)
 
         (ep_data_dir / folder_item_id).mkdir(parents=True, exist_ok=True)
 
@@ -1098,7 +1094,8 @@ class Vault:
 
         is_obf = meta.is_obfuscated(self.obfuscate_names)
         if not is_obf:
-            parent = (ep_data_dir / clean_path).parent
+            sanitized_path = sanitize_unobfuscated_folder_name(clean_path)
+            parent = (ep_data_dir / sanitized_path).parent
             while parent != ep_data_dir and parent.exists():
                 try:
                     parent.rmdir()
@@ -1134,8 +1131,10 @@ class Vault:
 
         is_obf = meta.is_obfuscated(self.obfuscate_names)
         if not is_obf:
-            old_disk_dir = ep_data_dir / clean_old
-            new_disk_dir = ep_data_dir / clean_new
+            sanitized_old = sanitize_unobfuscated_folder_name(clean_old)
+            sanitized_new = sanitize_unobfuscated_folder_name(clean_new)
+            old_disk_dir = ep_data_dir / sanitized_old
+            new_disk_dir = ep_data_dir / sanitized_new
             if old_disk_dir.exists():
                 new_disk_dir.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(old_disk_dir), str(new_disk_dir))
@@ -1146,12 +1145,12 @@ class Vault:
                 item.path = clean_new
                 item.name = clean_new.split("/")[-1]
                 if not is_obf:
-                    item.item_id = clean_new
+                    item.item_id = sanitize_unobfuscated_folder_name(clean_new)
             else:
                 rel = p[len(clean_old) + 1:]
                 item.path = f"{clean_new}/{rel}"
                 if not is_obf:
-                    item.item_id = item.path
+                    item.item_id = sanitize_unobfuscated_folder_name(item.path)
             meta.items[item.path] = item
 
         ep_file = self.entry_points[entry_point_name].archive_file
