@@ -1131,6 +1131,45 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(reassembled_dest.read_bytes(), original_data)
 
+    def test_progress_callback_on_add_and_export(self) -> None:
+        """Verify progress_callback reports byte counts during add_files and export_items."""
+        vault_dir = Path(self.tmp_dir) / "progress_test_vault"
+        vault = Vault.create_vault(vault_dir, name="ProgressVault", password=self.password, initial_entry_points=["docs"], sevenzip=self.sz)
+
+        sources = []
+        staging = Path(self.tmp_dir) / "progress_sources"
+        staging.mkdir(parents=True, exist_ok=True)
+        total_expected_size = 0
+        for i in range(5):
+            f = staging / f"file_{i}.dat"
+            data = os.urandom(4096 * (i + 1))
+            f.write_bytes(data)
+            sources.append(f)
+            total_expected_size += len(data)
+
+        add_progress_reports = []
+        def on_add_progress(done: int, total: int) -> None:
+            add_progress_reports.append((done, total))
+
+        vault.add_files("docs", sources, progress_callback=on_add_progress)
+
+        self.assertTrue(len(add_progress_reports) >= 2)
+        # First report is (0, total)
+        self.assertEqual(add_progress_reports[0], (0, total_expected_size))
+        # Final report has done == total
+        self.assertEqual(add_progress_reports[-1], (total_expected_size, total_expected_size))
+
+        # Test export progress
+        export_target = Path(self.tmp_dir) / "progress_exported"
+        export_progress_reports = []
+        def on_export_progress(done: int, total: int) -> None:
+            export_progress_reports.append((done, total))
+
+        vault.export_items("docs", [s.name for s in sources], export_target, progress_callback=on_export_progress)
+        self.assertTrue(len(export_progress_reports) >= 2)
+        self.assertEqual(export_progress_reports[0], (0, total_expected_size))
+        self.assertEqual(export_progress_reports[-1], (total_expected_size, total_expected_size))
+
 if __name__ == "__main__":
 
     unittest.main()

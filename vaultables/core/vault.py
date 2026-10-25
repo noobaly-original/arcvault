@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import threading
 import fnmatch
 import json
 import os
@@ -11,7 +12,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from vaultables.core.models import ArchiveItem, EntryPoint, FileCategory, VaultMetadata, classify_file, is_ignorable_system_file
 from vaultables.core.sevenzip import SevenZip, SevenZipOperationError
@@ -941,6 +942,7 @@ class Vault:
         entry_point_name: str,
         source_paths: List[Path],
         subfolder: str = "",
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> bool:
         """
         Add local files or directories into the entry point without re-archiving existing files.
@@ -1031,6 +1033,21 @@ class Vault:
             else:
                 collect_file(src, norm_sub)
 
+        total_bytes = sum(job[0].stat().st_size for job in file_jobs)
+        done_bytes = 0
+        done_lock = threading.Lock()
+
+        def on_chunk_bytes(byte_count: int) -> None:
+            nonlocal done_bytes
+            if not progress_callback:
+                return
+            with done_lock:
+                done_bytes += byte_count
+                progress_callback(min(done_bytes, total_bytes), total_bytes)
+
+        if progress_callback:
+            progress_callback(0, total_bytes)
+
         # Execute file encryption jobs in parallel
         if file_jobs:
             max_workers = min(os.cpu_count() or 4, 8, len(file_jobs))
@@ -1041,6 +1058,7 @@ class Vault:
                         job[0],  # source_file
                         job[1],  # item_dir
                         self.password,
+                        progress_callback=on_chunk_bytes,
                     ): job
                     for job in file_jobs
                 }
@@ -1063,6 +1081,9 @@ class Vault:
                     except Exception as e:
                         log_error(f"Failed to chunk and encrypt {source_file.name}: {e}")
                         raise
+
+        if progress_callback and total_bytes > 0:
+            progress_callback(total_bytes, total_bytes)
 
         # Save lightweight metadata
         ep_file = self.entry_points[entry_point_name].archive_file
@@ -1428,7 +1449,7 @@ class Vault:
             if tmp_path.exists():
                 tmp_path.unlink()
 
-    def export_entry_point(self, entry_point_name: str, dest_dir: Path) -> bool:
+    def export_entry_point(self, entry_point_name: str, dest_dir: Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> bool:
         """Export an entire entry point and all its subfolders/files into dest_dir."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
@@ -1445,6 +1466,23 @@ class Vault:
         ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         dest_dir.mkdir(parents=True, exist_ok=True)
 
+        items_to_export = [
+            it for it in meta.items.values()
+            if not it.is_dir and not is_ignorable_system_file(it.name)
+        ]
+        total_bytes = sum(it.size for it in items_to_export)
+        done_bytes = 0
+
+        def on_chunk_bytes(byte_count: int) -> None:
+            nonlocal done_bytes
+            if not progress_callback:
+                return
+            done_bytes += byte_count
+            progress_callback(min(done_bytes, total_bytes), total_bytes)
+
+        if progress_callback:
+            progress_callback(0, total_bytes)
+
         all_ok = True
         for p, item in meta.items.items():
             if is_ignorable_system_file(item.name):
@@ -1456,13 +1494,16 @@ class Vault:
             else:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 item_dir = ep_data_dir / item.item_id
-                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_path):
+                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_path, progress_callback=on_chunk_bytes):
                     all_ok = False
+
+        if progress_callback and total_bytes > 0:
+            progress_callback(total_bytes, total_bytes)
 
         log_info(f"Exported entire entry point '{entry_point_name}' ({len(meta.items)} items) to {dest_dir}")
         return all_ok
 
-    def export_items(self, entry_point_name: str, internal_paths: List[str], dest_dir: Path) -> bool:
+    def export_items(self, entry_point_name: str, internal_paths: List[str], dest_dir: Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> bool:
         """Export selected items from V2 entry point, reassembling any shredded chunks."""
         if not self.is_unlocked:
             raise VaultUnlockError("Vault is locked.")
@@ -1477,13 +1518,39 @@ class Vault:
         # If internal_paths is empty or specifies the entry point root/itself:
         if not internal_paths or "" in clean_paths or entry_point_name in clean_paths:
             target_dir = dest_dir if dest_dir.name == entry_point_name else (dest_dir / entry_point_name)
-            return self.export_entry_point(entry_point_name, target_dir)
+            return self.export_entry_point(entry_point_name, target_dir, progress_callback=progress_callback)
 
         ep_data_dir = self.arc_data_dir / meta.ep_dir_id
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         targets = clean_paths
         all_ok = True
+
+        total_bytes = 0
+        for clean_p in targets:
+            item = meta.items.get(clean_p)
+            if not item:
+                continue
+            if item.is_dir:
+                prefix = clean_p + '/'
+                total_bytes += sum(
+                    it.size for p, it in meta.items.items()
+                    if p.startswith(prefix) and not it.is_dir and not is_ignorable_system_file(it.name)
+                )
+            elif not is_ignorable_system_file(item.name):
+                total_bytes += item.size
+
+        done_bytes = 0
+
+        def on_chunk_bytes(byte_count: int) -> None:
+            nonlocal done_bytes
+            if not progress_callback:
+                return
+            done_bytes += byte_count
+            progress_callback(min(done_bytes, total_bytes), total_bytes)
+
+        if progress_callback:
+            progress_callback(0, total_bytes)
 
         for clean_p in targets:
             item = meta.items.get(clean_p)
@@ -1505,13 +1572,16 @@ class Vault:
                         rel = cp[len(clean_p) + 1:]
                         c_file = folder_dest / rel
                         c_item_dir = ep_data_dir / c_item.item_id
-                        if not self.v2_engine.extract_file_to_destination(c_item, c_item_dir, self.password, c_file):
+                        if not self.v2_engine.extract_file_to_destination(c_item, c_item_dir, self.password, c_file, progress_callback=on_chunk_bytes):
                             all_ok = False
             else:
                 target_file = dest_dir / item.name
                 item_dir = ep_data_dir / item.item_id
-                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_file):
+                if not self.v2_engine.extract_file_to_destination(item, item_dir, self.password, target_file, progress_callback=on_chunk_bytes):
                     all_ok = False
+
+        if progress_callback and total_bytes > 0:
+            progress_callback(total_bytes, total_bytes)
 
         log_info(f"Exported {len(targets)} items from '{entry_point_name}' to {dest_dir}")
         return all_ok

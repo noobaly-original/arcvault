@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from vaultables.core.models import ArchiveItem, FileCategory, classify_file
 from vaultables.core.sevenzip import SevenZip, SevenZipOperationError
@@ -298,11 +298,13 @@ class V2StorageEngine:
         item_dir: Path,
         password: str,
         chunk_size_override: Optional[int] = None,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[int, int, List[Dict[str, Any]]]:
         """
         Shred a file into 1GB encrypted chunks with store mode (-mx=0) and AES-256 (-mhe=on).
         If file <= 1GB, shredding is skipped and a single chunk_000.7z is created.
         Streams chunks directly via stdin (-si) without intermediate disk staging for multi-part files.
+        Optionally reports chunk byte increments to progress_callback.
         Returns (total_size, total_packed_size, chunk_list).
         """
         item_dir.mkdir(parents=True, exist_ok=True)
@@ -322,6 +324,8 @@ class V2StorageEngine:
                 "size": file_size,
                 "packed_size": packed_size,
             })
+            if progress_callback:
+                progress_callback(file_size)
             return file_size, packed_size, chunks
 
         # File > chunk_size: Shred into chunks directly via stdin streaming (no redundant temp file writes/reads)
@@ -343,6 +347,8 @@ class V2StorageEngine:
                     "size": len(data),
                     "packed_size": packed_size,
                 })
+                if progress_callback:
+                    progress_callback(len(data))
                 chunk_index += 1
                 if len(data) < effective_chunk_size:
                     break
@@ -395,10 +401,12 @@ class V2StorageEngine:
         item_dir: Path,
         password: str,
         dest_file: Path,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> bool:
         """
         Extract chunk(s) and reassemble into dest_file.
         Streams chunks in sequence to minimize memory and temporary disk usage.
+        Optionally reports extracted byte increments to progress_callback.
         """
         dest_file.parent.mkdir(parents=True, exist_ok=True)
         if dest_file.exists():
@@ -407,6 +415,8 @@ class V2StorageEngine:
         if not item.chunks:
             # Empty file
             dest_file.touch()
+            if progress_callback:
+                progress_callback(0)
             return True
 
         # Single chunk fast path
@@ -421,8 +431,12 @@ class V2StorageEngine:
                 extracted_files = list(Path(tmp_dir).iterdir())
                 if extracted_files:
                     shutil.move(str(extracted_files[0]), str(dest_file))
+                    if progress_callback:
+                        progress_callback(item.size)
                     return True
                 dest_file.touch()
+                if progress_callback:
+                    progress_callback(item.size)
                 return True
 
         # Multi-chunk streaming reassembly
@@ -449,5 +463,7 @@ class V2StorageEngine:
                                 if not buf:
                                     break
                                 f_out.write(buf)
+                                if progress_callback:
+                                    progress_callback(len(buf))
 
         return dest_file.exists()

@@ -234,6 +234,20 @@ QStatusBar {
     padding: 2px 8px;
 }
 
+QProgressBar {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    text-align: center;
+    color: #f8fafc;
+    font-size: 10px;
+    font-weight: 600;
+}
+QProgressBar::chunk {
+    background-color: #0284c7;
+    border-radius: 3px;
+}
+
 /* GroupBox & Labels */
 QGroupBox {
     border: 1px solid #334155;
@@ -492,6 +506,20 @@ QStatusBar {
     border-top: 1px solid #e2e8f0;
     color: #64748b;
     padding: 2px 8px;
+}
+
+QProgressBar {
+    background-color: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    text-align: center;
+    color: #0f172a;
+    font-size: 10px;
+    font-weight: 600;
+}
+QProgressBar::chunk {
+    background-color: #0284c7;
+    border-radius: 3px;
 }
 
 /* GroupBox & Labels */

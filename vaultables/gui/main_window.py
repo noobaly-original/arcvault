@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -15,6 +16,9 @@ from PyQt6.QtCore import QByteArray, QFileSystemWatcher, QMimeData, QPoint, QSiz
 from PyQt6.QtGui import QAction, QDesktopServices, QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
     QCheckBox,
     QDialog,
     QFileDialog,
@@ -195,6 +199,29 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready. Select or create an encrypted vault to begin.")
+
+        # Progress bar container embedded into status bar
+        self.progress_container = QWidget(self)
+        prog_layout = QHBoxLayout(self.progress_container)
+        prog_layout.setContentsMargins(4, 0, 4, 0)
+        prog_layout.setSpacing(8)
+
+        self.progress_label = QLabel(self.progress_container)
+        self.progress_label.setStyleSheet("font-size: 11px; font-weight: 500;")
+        prog_layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar(self.progress_container)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(14)
+        self.progress_bar.setFixedWidth(160)
+        self.progress_bar.setTextVisible(True)
+        prog_layout.addWidget(self.progress_bar)
+
+        self.status_bar.addPermanentWidget(self.progress_container)
+        self.progress_container.hide()
+        self._task_start_time = None
+        self._task_total_bytes = 0
 
     def _build_toolbar(self) -> None:
         self.toolbar = QToolBar("Main Toolbar", self)
@@ -982,6 +1009,52 @@ class MainWindow(QMainWindow):
             if path_objs:
                 self._start_add_files(path_objs, target_subfolder=self.current_subfolder)
 
+    def _reset_progress(self) -> None:
+        self.progress_container.hide()
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("")
+        self._task_start_time = None
+        self._task_total_bytes = 0
+
+    def _start_progress(self, total_bytes: int = 0) -> None:
+        self._task_start_time = time.time()
+        self._task_total_bytes = total_bytes
+        self.progress_bar.setValue(0)
+        if total_bytes > 0:
+            self.progress_label.setText(f"0 B / {format_size(total_bytes)} ({format_size(total_bytes)} remaining)")
+        else:
+            self.progress_label.setText("Preparing...")
+        self.progress_container.show()
+
+    def _on_task_progress(self, bytes_done: int, total_bytes: int) -> None:
+        if total_bytes <= 0:
+            return
+
+        self._task_total_bytes = total_bytes
+        pct = int(min(100, max(0, (bytes_done / total_bytes) * 100)))
+        self.progress_bar.setValue(pct)
+
+        elapsed = time.time() - (self._task_start_time or time.time())
+        speed_str = ""
+        eta_str = ""
+
+        if elapsed > 0.5 and bytes_done > 0:
+            bps = bytes_done / elapsed
+            speed_str = f" • {format_size(int(bps))}/s"
+            remaining_bytes = max(0, total_bytes - bytes_done)
+            if bps > 0 and remaining_bytes > 0:
+                seconds_left = int(remaining_bytes / bps)
+                mins, secs = divmod(seconds_left, 60)
+                hours, mins = divmod(mins, 60)
+                if hours > 0:
+                    eta_str = f" • ETA {hours:02d}:{mins:02d}:{secs:02d}"
+                else:
+                    eta_str = f" • ETA {mins:02d}:{secs:02d}"
+
+        rem_bytes = max(0, total_bytes - bytes_done)
+        label_text = f"{format_size(bytes_done)} / {format_size(total_bytes)} ({format_size(rem_bytes)} remaining){speed_str}{eta_str}"
+        self.progress_label.setText(label_text)
+
     def _start_add_files(self, files: List[Path], target_subfolder: str = "") -> None:
         files = [f for f in files if not is_ignorable_system_file(f)]
         if not files:
@@ -990,13 +1063,22 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(
             f"Encrypting and adding {len(files)} items into {self.active_entry_point}.7z{sub_info}..."
         )
+        total_size = 0
+        for f in files:
+            if f.is_file():
+                total_size += f.stat().st_size
+            elif f.is_dir():
+                total_size += sum(child.stat().st_size for child in f.rglob('*') if child.is_file() and not is_ignorable_system_file(child))
+        self._start_progress(total_size)
         self._add_worker = AddFilesWorker(
             self.vault, self.active_entry_point, files, subfolder=target_subfolder
         )
+        self._add_worker.progress.connect(self._on_task_progress)
         self._add_worker.finished.connect(self._on_add_finished)
         self._add_worker.start()
 
     def _on_add_finished(self, success: bool, error_msg: str) -> None:
+        self._reset_progress()
         if success:
             self.status_bar.showMessage("Files encrypted and added successfully.")
             self.refresh_current_view()
@@ -1090,13 +1172,17 @@ class MainWindow(QMainWindow):
 
         dest_path = Path(dest)
         self.status_bar.showMessage(f"Decrypting and exporting {len(items)} item(s)...")
+        total_size = sum(it.size for it in items if not it.is_dir)
+        self._start_progress(total_size)
         self._export_worker = ExportFilesWorker(
             self.vault, items, dest_path, active_entry_point=self.active_entry_point
         )
+        self._export_worker.progress.connect(self._on_task_progress)
         self._export_worker.finished.connect(self._on_export_finished)
         self._export_worker.start()
 
     def _on_export_finished(self, success: bool, error_msg: str) -> None:
+        self._reset_progress()
         if success:
             self.status_bar.showMessage("Export completed successfully.")
             QMessageBox.information(self, "Export Complete", "Selected files were exported successfully.")

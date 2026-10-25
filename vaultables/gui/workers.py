@@ -63,6 +63,7 @@ class AddFilesWorker(QThread):
     """Worker thread to encrypt and add files to an entry point archive."""
 
     finished = pyqtSignal(bool, str)  # (success, error_message)
+    progress = pyqtSignal(int, int)   # (bytes_done, total_bytes)
 
     def __init__(
         self,
@@ -79,7 +80,15 @@ class AddFilesWorker(QThread):
 
     def run(self) -> None:
         try:
-            ok = self.vault.add_files(self.entry_point_name, self.files, self.subfolder)
+            def on_progress(done: int, total: int) -> None:
+                self.progress.emit(done, total)
+
+            ok = self.vault.add_files(
+                self.entry_point_name,
+                self.files,
+                self.subfolder,
+                progress_callback=on_progress,
+            )
             if ok:
                 self.finished.emit(True, "")
             else:
@@ -180,6 +189,7 @@ class ExportFilesWorker(QThread):
     """Worker thread to export files or entire entry points to local directory."""
 
     finished = pyqtSignal(bool, str)
+    progress = pyqtSignal(int, int)   # (bytes_done, total_bytes)
 
     def __init__(
         self,
@@ -208,6 +218,9 @@ class ExportFilesWorker(QThread):
 
     def run(self) -> None:
         try:
+            def on_progress(done: int, total: int) -> None:
+                self.progress.emit(done, total)
+
             if self.items is not None:
                 all_ok = True
                 # 1. Process whole entry points
@@ -215,7 +228,7 @@ class ExportFilesWorker(QThread):
                 for ep_it in ep_items:
                     ep_name = ep_it.entry_point_name or ep_it.name
                     target = self.dest_dir if self.dest_dir.name == ep_name else (self.dest_dir / ep_name)
-                    if not self.vault.export_entry_point(ep_name, target):
+                    if not self.vault.export_entry_point(ep_name, target, progress_callback=on_progress):
                         all_ok = False
 
                 # 2. Process regular items (grouped by entry_point_name)
@@ -228,12 +241,14 @@ class ExportFilesWorker(QThread):
                             ep_groups.setdefault(ep, []).append(it.path)
 
                     for ep, paths in ep_groups.items():
-                        if not self.vault.export_items(ep, paths, self.dest_dir):
+                        if not self.vault.export_items(ep, paths, self.dest_dir, progress_callback=on_progress):
                             all_ok = False
 
                 self.finished.emit(all_ok, "" if all_ok else "One or more items could not be exported.")
             else:
-                ok = self.vault.export_items(self.entry_point_name, self.internal_paths, self.dest_dir)
+                ok = self.vault.export_items(
+                    self.entry_point_name, self.internal_paths, self.dest_dir, progress_callback=on_progress
+                )
                 self.finished.emit(ok, "" if ok else "Extraction failed.")
         except Exception as e:
             self.finished.emit(False, str(e))
