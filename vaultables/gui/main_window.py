@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from vaultables import __version__
 from vaultables.config import AppConfig
 from vaultables.core.credentials import (
     delete_vault_password,
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
         self._add_worker: Optional[AddFilesWorker] = None
         self._export_worker: Optional[ExportFilesWorker] = None
         self._update_worker: Optional[UpdateFileWorker] = None
+        self._update_check_worker: Optional[Any] = None
 
         # External Editor Watcher: {str(file_path): (ep_name, internal_path, mtime, hash)}
         self.file_watcher = QFileSystemWatcher(self)
@@ -105,6 +107,11 @@ class MainWindow(QMainWindow):
             last_p = Path(self.config.last_selected_vault_path)
             if last_p.exists():
                 self.open_vault_by_path(last_p, prompt_unlock=auto_unlock_last)
+
+        # Background update check on startup if enabled
+        if self.config.is_check_updates_enabled():
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1500, lambda: self.check_for_updates(manual=False))
 
     def _build_ui(self) -> None:
         """Construct toolbar, panels, and status bar."""
@@ -281,6 +288,20 @@ class MainWindow(QMainWindow):
         self.chk_store_password.toggled.connect(self._on_store_password_toggled)
         self.toolbar.addWidget(self.chk_store_password)
 
+        self.chk_check_updates = QCheckBox("Check Updates", self)
+        self.chk_check_updates.setToolTip("Automatically check for new releases on startup")
+        self.chk_check_updates.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_check_updates.setChecked(self.config.is_check_updates_enabled())
+        self.chk_check_updates.toggled.connect(self._on_check_updates_toggled)
+        self.toolbar.addWidget(self.chk_check_updates)
+
+        self.btn_check_updates = QToolButton(self)
+        self.btn_check_updates.setIcon(IconProvider.get_icon("update", dark_mode=self.dark_mode, size=18))
+        self.btn_check_updates.setToolTip("Check GitHub for newer versions of Vaultables")
+        self.btn_check_updates.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_check_updates.clicked.connect(lambda: self.check_for_updates(manual=True))
+        self.toolbar.addWidget(self.btn_check_updates)
+
         self.toolbar.addSeparator()
 
         self.act_logs = QAction("Vault Logs", self)
@@ -320,6 +341,11 @@ class MainWindow(QMainWindow):
         self.act_rename_vault.setEnabled(has_unlocked_vault)
         self.act_check_imports.setEnabled(has_unlocked_vault)
 
+        if hasattr(self, "chk_check_updates"):
+            self.chk_check_updates.blockSignals(True)
+            self.chk_check_updates.setChecked(self.config.is_check_updates_enabled())
+            self.chk_check_updates.blockSignals(False)
+
         self.chk_store_password.setEnabled(has_unlocked_vault)
         self.chk_store_password.blockSignals(True)
         if has_unlocked_vault:
@@ -329,6 +355,49 @@ class MainWindow(QMainWindow):
         else:
             self.chk_store_password.setChecked(False)
         self.chk_store_password.blockSignals(False)
+
+    def _on_check_updates_toggled(self, checked: bool) -> None:
+        self.config.set_check_updates_enabled(checked)
+        status = "enabled" if checked else "disabled"
+        self.status_bar.showMessage(f"Automatic update checks on startup {status}.", 3000)
+
+    def check_for_updates(self, manual: bool = False) -> None:
+        """Check GitHub for newer releases in a background worker."""
+        if hasattr(self, "_update_check_worker") and self._update_check_worker and self._update_check_worker.isRunning():
+            if manual:
+                self.status_bar.showMessage("Update check already in progress...", 2500)
+            return
+
+        if manual:
+            self.status_bar.showMessage("Checking GitHub for updates...", 3000)
+
+        from vaultables.gui.workers import CheckUpdatesWorker
+        self._update_check_worker = CheckUpdatesWorker(current_version=__version__, manual=manual, parent=self)
+        self._update_check_worker.finished.connect(self._on_update_check_finished)
+        self._update_check_worker.start()
+
+    def _on_update_check_finished(self, update_info: Any, manual: bool) -> None:
+        if hasattr(self, "chk_check_updates"):
+            self.chk_check_updates.blockSignals(True)
+            self.chk_check_updates.setChecked(self.config.is_check_updates_enabled())
+            self.chk_check_updates.blockSignals(False)
+
+        if update_info.available:
+            self.status_bar.showMessage(f"New update available: v{update_info.latest_version}", 5000)
+            from vaultables.gui.update_dialog import UpdateDialog
+            dlg = UpdateDialog(update_info, parent=self, dark_mode=self.dark_mode)
+            dlg.exec()
+        elif manual:
+            if update_info.error:
+                self.status_bar.showMessage(f"Update check failed: {update_info.error}", 4000)
+            else:
+                self.status_bar.showMessage(f"Vaultables is up to date (v{__version__}).", 4000)
+            from vaultables.gui.update_dialog import UpdateDialog
+            dlg = UpdateDialog(update_info, parent=self, dark_mode=self.dark_mode)
+            dlg.exec()
+        else:
+            if not update_info.error:
+                self.status_bar.showMessage(f"Vaultables v{__version__} is up to date.", 3000)
 
     def _on_store_password_toggled(self, checked: bool) -> None:
         if not self.vault or not self.vault.is_unlocked:
@@ -376,6 +445,8 @@ class MainWindow(QMainWindow):
         )
         self.act_preview_toggle.setIcon(IconProvider.get_icon("preview", dark_mode=self.dark_mode, size=20))
         self.act_about.setIcon(IconProvider.get_icon("info", dark_mode=self.dark_mode, size=20))
+        if hasattr(self, "btn_check_updates"):
+            self.btn_check_updates.setIcon(IconProvider.get_icon("update", dark_mode=self.dark_mode, size=18))
 
         self.sidebar.set_theme(self.dark_mode)
         self.breadcrumbs.set_theme(self.dark_mode)

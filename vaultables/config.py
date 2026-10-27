@@ -22,6 +22,7 @@ class AppConfig:
         self.sevenzip_override_path: Optional[str] = None
         self.preview_max_text_size_kb: int = 4096
         self.last_selected_vault_path: Optional[str] = None
+        self.check_updates_on_startup: bool = True
 
         # Window state persistence
         self.window_geometry: Optional[str] = None
@@ -49,6 +50,7 @@ class AppConfig:
             self.sevenzip_override_path = data.get("sevenzip_override_path")
             self.preview_max_text_size_kb = data.get("preview_max_text_size_kb", 4096)
             self.last_selected_vault_path = data.get("last_selected_vault_path")
+            self.check_updates_on_startup = bool(data.get("check_updates_on_startup", True))
 
             # Window state
             self.window_geometry = data.get("window_geometry")
@@ -74,6 +76,7 @@ class AppConfig:
                 "sevenzip_override_path": self.sevenzip_override_path,
                 "preview_max_text_size_kb": self.preview_max_text_size_kb,
                 "last_selected_vault_path": self.last_selected_vault_path,
+                "check_updates_on_startup": self.check_updates_on_startup,
                 "window_geometry": self.window_geometry,
                 "window_maximized": self.window_maximized,
                 "window_width": self.window_width,
@@ -88,6 +91,15 @@ class AppConfig:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"[Vaultables] Failed to save config: {e}")
+
+    def is_check_updates_enabled(self) -> bool:
+        """Return whether automatic update checking on startup is enabled."""
+        return getattr(self, "check_updates_on_startup", True)
+
+    def set_check_updates_enabled(self, enabled: bool) -> None:
+        """Persist automatic update checking preference."""
+        self.check_updates_on_startup = bool(enabled)
+        self.save()
 
     def add_or_update_vault(self, vault_path: str, name: str) -> None:
         """Add or update a vault in known vaults list."""

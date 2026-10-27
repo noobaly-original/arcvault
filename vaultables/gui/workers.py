@@ -252,3 +252,19 @@ class ExportFilesWorker(QThread):
                 self.finished.emit(ok, "" if ok else "Extraction failed.")
         except Exception as e:
             self.finished.emit(False, str(e))
+
+
+class CheckUpdatesWorker(QThread):
+    """Worker thread to query GitHub releases for application updates without blocking the UI."""
+
+    finished = pyqtSignal(object, bool)  # (UpdateInfo, manual: bool)
+
+    def __init__(self, current_version: str, manual: bool = False, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self.current_version = current_version
+        self.manual = manual
+
+    def run(self) -> None:
+        from vaultables.core.updater import check_for_updates_sync
+        update_info = check_for_updates_sync(self.current_version)
+        self.finished.emit(update_info, self.manual)

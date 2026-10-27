@@ -1333,6 +1333,78 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertGreater(vault.entry_points["docs"].size_on_disk, 50000)
         self.assertEqual(vault.entry_points["docs"].item_count, 1)
 
+    def test_updater_version_parsing_and_comparison(self) -> None:
+        """Verify semver parsing and version comparison logic in vaultables.core.updater."""
+        from vaultables.core.updater import parse_version, is_newer_version
+
+        # 1. Parsing
+        self.assertEqual(parse_version("v2.1.7"), (2, 1, 7))
+        self.assertEqual(parse_version("2.1.7"), (2, 1, 7))
+        self.assertEqual(parse_version("v2.2.0"), (2, 2, 0))
+        self.assertEqual(parse_version("v2.1.7.1"), (2, 1, 7, 1))
+        self.assertEqual(parse_version("v3.0.0-beta1"), (3, 0, 0))
+        self.assertEqual(parse_version(""), (0,))
+
+        # 2. Comparisons
+        self.assertTrue(is_newer_version("v2.1.8", "2.1.7"))
+        self.assertTrue(is_newer_version("v2.2.0", "2.1.7"))
+        self.assertTrue(is_newer_version("v3.0.0", "2.1.7"))
+        self.assertFalse(is_newer_version("v2.1.7", "2.1.7"))
+        self.assertFalse(is_newer_version("2.1.7", "2.1.7"))
+        self.assertFalse(is_newer_version("v2.1.6", "2.1.7"))
+        self.assertFalse(is_newer_version("v1.5.0", "2.1.7"))
+
+    def test_updater_mock_api_check(self) -> None:
+        """Verify check_for_updates_sync parses valid GitHub response and handles network errors."""
+        from unittest.mock import MagicMock, patch
+        import urllib.error
+        from vaultables.core.updater import check_for_updates_sync
+
+        # 1. Successful check with update available
+        mock_resp_data = b'''{
+            "tag_name": "v2.5.0",
+            "name": "v2.5.0 Feature Release",
+            "html_url": "https://github.com/noobaly-original/vaultables/releases/tag/v2.5.0",
+            "body": "Awesome update!",
+            "published_at": "2026-10-27T12:00:00Z"
+        }'''
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = mock_resp_data
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            info = check_for_updates_sync(current_version="2.1.7")
+            self.assertTrue(info.available)
+            self.assertEqual(info.latest_version, "2.5.0")
+            self.assertEqual(info.release_name, "v2.5.0 Feature Release")
+            self.assertEqual(info.release_notes, "Awesome update!")
+            self.assertIsNone(info.error)
+
+        # 2. Successful check with up-to-date version
+        mock_same_data = b'''{
+            "tag_name": "v2.1.7",
+            "name": "v2.1.7 Release",
+            "html_url": "https://github.com/noobaly-original/vaultables/releases/tag/v2.1.7",
+            "body": "",
+            "published_at": "2026-10-27T12:00:00Z"
+        }'''
+        mock_resp_same = MagicMock()
+        mock_resp_same.read.return_value = mock_same_data
+        mock_resp_same.__enter__.return_value = mock_resp_same
+
+        with patch("urllib.request.urlopen", return_value=mock_resp_same):
+            info2 = check_for_updates_sync(current_version="2.1.7")
+            self.assertFalse(info2.available)
+            self.assertEqual(info2.latest_version, "2.1.7")
+            self.assertIsNone(info2.error)
+
+        # 3. Network error handling
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Network unreachable")):
+            info3 = check_for_updates_sync(current_version="2.1.7")
+            self.assertFalse(info3.available)
+            self.assertIsNotNone(info3.error)
+            self.assertIn("Network unreachable", info3.error)
+
 if __name__ == "__main__":
 
     unittest.main()

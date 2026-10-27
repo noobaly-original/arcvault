@@ -1089,6 +1089,75 @@ class TestVaultablesGUI(unittest.TestCase):
 
         win.close()
 
+    def test_update_dialog_and_toolbar_toggle(self) -> None:
+        """Verify toolbar 'Check Updates' checkbox and UpdateDialog states."""
+        from vaultables.core.updater import UpdateInfo
+        from vaultables.gui.update_dialog import UpdateDialog
+
+        win = MainWindow(self.config, auto_unlock_last=False)
+
+        # 1. Verify toolbar controls exist and are enabled
+        self.assertTrue(hasattr(win, "chk_check_updates"))
+        self.assertTrue(hasattr(win, "btn_check_updates"))
+        self.assertTrue(win.chk_check_updates.isEnabled())
+        self.assertTrue(win.btn_check_updates.isEnabled())
+
+        # 2. Toggle "Check Updates" updates config and status bar
+        win.chk_check_updates.setChecked(False)
+        self.assertFalse(self.config.is_check_updates_enabled())
+        self.assertIn("disabled", win.status_bar.currentMessage())
+
+        win.chk_check_updates.setChecked(True)
+        self.assertTrue(self.config.is_check_updates_enabled())
+        self.assertIn("enabled", win.status_bar.currentMessage())
+
+        # 3. UpdateDialog: Update Available
+        info_avail = UpdateInfo(
+            available=True,
+            current_version="2.1.7",
+            latest_version="2.2.0",
+            release_name="v2.2.0 - Next Gen",
+            release_url="https://github.com/noobaly-original/vaultables/releases/tag/v2.2.0",
+            release_notes="- Added amazing new features\n- Performance boost",
+            published_at="2026-10-27T12:00:00Z",
+        )
+        dlg_avail = UpdateDialog(info_avail, parent=win, dark_mode=True)
+        self.assertEqual(dlg_avail.windowTitle(), "Update Available")
+        self.assertTrue(hasattr(dlg_avail, "btn_download"))
+        dlg_avail.close()
+
+        # 4. UpdateDialog: Up to Date
+        info_uptodate = UpdateInfo(
+            available=False,
+            current_version="2.1.7",
+            latest_version="2.1.7",
+            release_name="v2.1.7",
+            release_url="https://github.com/noobaly-original/vaultables/releases/tag/v2.1.7",
+            release_notes="",
+            published_at="",
+        )
+        dlg_uptodate = UpdateDialog(info_uptodate, parent=win, dark_mode=False)
+        self.assertEqual(dlg_uptodate.windowTitle(), "Update Check")
+        self.assertTrue(hasattr(dlg_uptodate, "btn_close"))
+        dlg_uptodate.close()
+
+        # 5. UpdateDialog: Network Error
+        info_err = UpdateInfo(
+            available=False,
+            current_version="2.1.7",
+            latest_version="",
+            release_name="",
+            release_url="",
+            release_notes="",
+            published_at="",
+            error="Connection timed out",
+        )
+        dlg_err = UpdateDialog(info_err, parent=win, dark_mode=True)
+        self.assertEqual(dlg_err.windowTitle(), "Update Error")
+        dlg_err.close()
+
+        win.close()
+
 if __name__ == "__main__":
 
     unittest.main()

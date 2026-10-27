@@ -131,8 +131,12 @@ class AboutDialog(QDialog):
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
 
-        # Footer with Close button
+        # Footer with Check for Updates and Close buttons
         btn_layout = QHBoxLayout()
+        self.btn_check_updates = QPushButton("Check for Updates", self)
+        self.btn_check_updates.clicked.connect(self._on_check_updates_clicked)
+        btn_layout.addWidget(self.btn_check_updates)
+
         btn_layout.addStretch()
 
         self.btn_close = QPushButton("Close", self)
@@ -141,3 +145,15 @@ class AboutDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
 
         layout.addLayout(btn_layout)
+
+    def _on_check_updates_clicked(self) -> None:
+        parent_w = self.parent()
+        if parent_w and hasattr(parent_w, "check_for_updates"):
+            self.accept()
+            parent_w.check_for_updates(manual=True)
+        else:
+            from vaultables.core.updater import check_for_updates_sync
+            from vaultables.gui.update_dialog import UpdateDialog
+            info = check_for_updates_sync(__version__)
+            dlg = UpdateDialog(info, parent=self, dark_mode=self.dark_mode)
+            dlg.exec()
