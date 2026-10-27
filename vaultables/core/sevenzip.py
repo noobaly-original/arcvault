@@ -119,6 +119,7 @@ class SevenZip:
         args: List[str],
         cwd: Optional[Path] = None,
         check: bool = False,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
         """Run 7-Zip command with arguments list (avoids shell execution)."""
         cmd = [self.binary] + args
@@ -128,16 +129,22 @@ class SevenZip:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        res = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=str(cwd) if cwd else None,
-            startupinfo=startupinfo,
-        )
+        try:
+            res = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(cwd) if cwd else None,
+                startupinfo=startupinfo,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            cmd_preview = " ".join(cmd[:3])
+            raise SevenZipOperationError(f"7-Zip command timed out after {timeout}s: {cmd_preview}") from e
 
         try:
             from vaultables.logger import log_7zip
@@ -156,6 +163,7 @@ class SevenZip:
         input_bytes: bytes,
         cwd: Optional[Path] = None,
         check: bool = False,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess:
         """Run 7-Zip command with input piped into stdin."""
         cmd = [self.binary] + args
@@ -164,14 +172,19 @@ class SevenZip:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        res = subprocess.run(
-            cmd,
-            input=input_bytes,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=str(cwd) if cwd else None,
-            startupinfo=startupinfo,
-        )
+        try:
+            res = subprocess.run(
+                cmd,
+                input=input_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(cwd) if cwd else None,
+                startupinfo=startupinfo,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            cmd_preview = " ".join(cmd[:3])
+            raise SevenZipOperationError(f"7-Zip command timed out after {timeout}s: {cmd_preview}") from e
 
         stdout_str = res.stdout.decode("utf-8", "replace") if isinstance(res.stdout, bytes) else (res.stdout or "")
         stderr_str = res.stderr.decode("utf-8", "replace") if isinstance(res.stderr, bytes) else (res.stderr or "")
@@ -187,20 +200,62 @@ class SevenZip:
             raise SevenZipOperationError(f"7-Zip error ({res.returncode}): {err}")
         return res
 
-    def test_archive(self, archive_path: Path, password: str) -> bool:
-        """Test archive integrity and verify if password opens the archive."""
+    def test_archive(self, archive_path: Path, password: str, fast_mode: bool = True) -> bool:
+        """
+        Test archive integrity and verify if password opens the archive.
+        When fast_mode is True, attempts fast header verification (7z l) or single-file
+        testing to verify AES-256 credentials in milliseconds without streaming or
+        decompressing multi-gigabyte payloads across cloud/network drives.
+        """
         if not archive_path.exists():
             return False
 
-        res = self._run(["t", f"-p{password}", "-y", str(archive_path.resolve())])
-        if res.returncode in (0, 1) and "Everything is Ok" in res.stdout:
-            return True
+        path_str = str(archive_path.resolve())
 
-        stdout_err = (res.stdout + "\n" + res.stderr).lower()
-        if "wrong password" in stdout_err or "cannot open encrypted" in stdout_err or "headers error" in stdout_err:
+        if fast_mode:
+            try:
+                # 1. Header inspection via '7z l'
+                # If the archive was created with header encryption (-mhe=on), '7z l'
+                # validates the AES-256 password in milliseconds without decompressing chunk payloads.
+                res = self._run(["l", "-slt", f"-p{password}", "-y", path_str], timeout=15.0)
+                if res.returncode in (0, 1):
+                    stdout_lower = res.stdout.lower()
+                    if "method = " in stdout_lower and "7zaes" in stdout_lower:
+                        # Find the first file or metadata.json to test decompression of just one entry
+                        first_file = None
+                        for line in res.stdout.splitlines():
+                            if line.startswith("Path = "):
+                                candidate = line.split("=", 1)[1].strip()
+                                if candidate and candidate != archive_path.name and candidate != path_str:
+                                    first_file = candidate
+                                    if candidate in ("metadata.json", ".vaultables_init"):
+                                        break
+                        if first_file:
+                            test_res = self._run(["t", f"-p{password}", "-y", path_str, first_file], timeout=15.0)
+                            return test_res.returncode in (0, 1) and "Everything is Ok" in test_res.stdout
+                        return True
+                    elif "everything is ok" in res.stdout:
+                        return True
+                else:
+                    stdout_err = (res.stdout + "\n" + res.stderr).lower()
+                    if "wrong password" in stdout_err or "cannot open encrypted" in stdout_err or "headers error" in stdout_err:
+                        return False
+            except Exception:
+                pass
+
+        # 2. Fallback to standard archive test with bounded timeout
+        try:
+            res = self._run(["t", f"-p{password}", "-y", path_str], timeout=30.0)
+            if res.returncode in (0, 1) and "Everything is Ok" in res.stdout:
+                return True
+
+            stdout_err = (res.stdout + "\n" + res.stderr).lower()
+            if "wrong password" in stdout_err or "cannot open encrypted" in stdout_err or "headers error" in stdout_err:
+                return False
+
+            return res.returncode in (0, 1)
+        except Exception:
             return False
-
-        return res.returncode in (0, 1)
 
     def list_archive(self, archive_path: Path, password: str, entry_point_name: str = "") -> List[ArchiveItem]:
         """List contents of archive using '-slt' switch."""

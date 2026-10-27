@@ -1232,6 +1232,107 @@ class TestVaultablesBackend(unittest.TestCase):
         self.assertFalse(vault.delete_items("docs", []))
         self.assertFalse(vault.delete_items("docs", ["nonexistent.txt"]))
 
+    def test_cloud_friendly_canary_and_legacy_check(self) -> None:
+        """Verify cloud-friendly vault_check.7z, legacy .vault_check.7z fallback, and automatic canary creation."""
+        vault_dir = Path(self.tmp_dir) / "cloud_canary_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="CloudCanaryVault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        # 1. New vault creates vault_check.7z (non-dot for Google Drive / OneDrive sync compatibility)
+        self.assertTrue((vault_dir / "vault_check.7z").is_file())
+        self.assertFalse((vault_dir / ".vault_check.7z").exists())
+        self.assertTrue(Vault.is_vault_dir(vault_dir))
+
+        vault.lock()
+        reopened = Vault(vault_dir, self.sz)
+        self.assertTrue(reopened.unlock(self.password))
+        reopened.lock()
+
+        # 2. Legacy check: simulate old vault with .vault_check.7z only
+        (vault_dir / "vault_check.7z").unlink()
+        self.sz.create_empty_archive(vault_dir / ".vault_check.7z", self.password)
+        self.assertTrue((vault_dir / ".vault_check.7z").is_file())
+        self.assertFalse((vault_dir / "vault_check.7z").exists())
+
+        # is_vault_dir detects legacy check
+        self.assertTrue(Vault.is_vault_dir(vault_dir))
+
+        legacy_vault = Vault(vault_dir, self.sz)
+        self.assertTrue(legacy_vault.unlock(self.password))
+        # Unlocking migrates/creates the non-dot vault_check.7z for cloud sync
+        self.assertTrue((vault_dir / "vault_check.7z").is_file())
+        legacy_vault.lock()
+
+        # 3. Cloud sync delay: simulate both check archives missing on target machine
+        (vault_dir / "vault_check.7z").unlink()
+        (vault_dir / ".vault_check.7z").unlink()
+        self.assertFalse((vault_dir / "vault_check.7z").exists())
+        self.assertFalse((vault_dir / ".vault_check.7z").exists())
+
+        # Still detected via .vaultables marker
+        self.assertTrue(Vault.is_vault_dir(vault_dir))
+
+        cloud_vault = Vault(vault_dir, self.sz)
+        # Unlock verifies against docs.7z and recreates vault_check.7z
+        self.assertTrue(cloud_vault.unlock(self.password))
+        self.assertTrue((vault_dir / "vault_check.7z").is_file())
+        cloud_vault.lock()
+
+        # Wrong password fails fast
+        wrong_vault = Vault(vault_dir, self.sz)
+        self.assertFalse(wrong_vault.unlock("WrongPassword123!"))
+
+    def test_open_vault_by_file_path(self) -> None:
+        """Verify pointing Vault to a file within the vault resolves to enclosing vault root."""
+        vault_dir = Path(self.tmp_dir) / "file_open_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="FileOpenVault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        # 1. Pointing to docs.7z
+        v1 = Vault(vault_dir / "docs.7z", self.sz)
+        self.assertEqual(v1.root_dir.resolve(), vault_dir.resolve())
+        self.assertTrue(v1.unlock(self.password))
+
+        # 2. Pointing to vault_check.7z
+        v2 = Vault(vault_dir / "vault_check.7z", self.sz)
+        self.assertEqual(v2.root_dir.resolve(), vault_dir.resolve())
+        self.assertTrue(v2.unlock(self.password))
+
+    def test_fast_header_password_verification_and_size_calculation(self) -> None:
+        """Verify fast header test works and refresh_entry_points computes size without disk scan."""
+        vault_dir = Path(self.tmp_dir) / "fast_test_vault"
+        vault = Vault.create_vault(
+            vault_dir,
+            name="FastTestVault",
+            password=self.password,
+            initial_entry_points=["docs"],
+            sevenzip=self.sz,
+        )
+
+        # Fast test on entry point archive
+        ep_file = vault_dir / "docs.7z"
+        self.assertTrue(self.sz.test_archive(ep_file, self.password, fast_mode=True))
+        self.assertFalse(self.sz.test_archive(ep_file, "wrong_password", fast_mode=True))
+
+        # Add a file
+        f = Path(self.tmp_dir) / "sample.bin"
+        f.write_bytes(b"X" * 50000)
+        vault.add_files("docs", [f])
+
+        # Verify entry point size is > 0 and computed accurately
+        self.assertGreater(vault.entry_points["docs"].size_on_disk, 50000)
+        self.assertEqual(vault.entry_points["docs"].item_count, 1)
+
 if __name__ == "__main__":
 
     unittest.main()

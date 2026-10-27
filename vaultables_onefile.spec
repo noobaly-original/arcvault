@@ -81,8 +81,8 @@ if sys.platform == "darwin" and os.environ.get("BUILD_MACOS_BUNDLE", "0") == "1"
         icon=icon_file,
         bundle_identifier="com.vaultables.desktop",
         info_plist={
-            "CFBundleShortVersionString": "2.1.6",
-            "CFBundleVersion": "2.1.6",
+            "CFBundleShortVersionString": "2.1.7",
+            "CFBundleVersion": "2.1.7",
             "NSHighResolutionCapable": "True",
             "CFBundleDisplayName": "Vaultables",
             "CFBundleName": "Vaultables",

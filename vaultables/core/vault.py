@@ -46,7 +46,8 @@ class Vault:
     """
 
     MARKER_FILENAME = ".vaultables"
-    CHECK_FILENAME = ".vault_check.7z"
+    CHECK_FILENAME = "vault_check.7z"
+    LEGACY_CHECK_FILENAME = ".vault_check.7z"
     ARC_DATA_DIRNAME = "vaultables-data"
     IMPORT_DIRNAME = "import"
     IMPORTS_ENTRY_POINT_NAME = "imports"
@@ -57,8 +58,8 @@ class Vault:
         if not directory.exists() or not directory.is_dir():
             return False
 
-        # 1. Fast verification check archive
-        if (directory / cls.CHECK_FILENAME).is_file():
+        # 1. Fast verification check archive (primary vault_check.7z, fallback to legacy .vault_check.7z)
+        if (directory / cls.CHECK_FILENAME).is_file() or (directory / cls.LEGACY_CHECK_FILENAME).is_file():
             return True
 
         # 2. Primary metadata marker file (.vaultables)
@@ -95,6 +96,9 @@ class Vault:
         except Exception:
             curr = target_path
 
+        if curr.is_file():
+            curr = curr.parent
+
         while True:
             if cls.is_vault_dir(curr):
                 return curr
@@ -110,7 +114,11 @@ class Vault:
         sevenzip: Optional[SevenZip] = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> None:
-        self.root_dir = root_dir.resolve()
+        resolved = root_dir.resolve()
+        if resolved.is_file():
+            enclosing = self.find_enclosing_vault(resolved)
+            resolved = enclosing if enclosing else resolved.parent
+        self.root_dir = resolved
         self.sevenzip = sevenzip or SevenZip()
         self.chunk_size = chunk_size
         self.v2_engine = V2StorageEngine(self.sevenzip, chunk_size=chunk_size)
@@ -273,7 +281,7 @@ class Vault:
         marker_file = root_dir / cls.MARKER_FILENAME
         marker_file.write_text(json.dumps(metadata_dict, indent=2), encoding="utf-8")
 
-        # Fast password verification archive
+        # Fast password verification archive (non-dot filename for cloud drive sync compatibility)
         check_path = root_dir / cls.CHECK_FILENAME
         sz.create_empty_archive(check_path, password)
 
@@ -299,24 +307,41 @@ class Vault:
 
         self.arc_data_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Try checking against check archive
+        # 1. Try checking against check archive (primary vault_check.7z, fallback to legacy .vault_check.7z)
         check_file = self.root_dir / self.CHECK_FILENAME
+        legacy_check_file = self.root_dir / self.LEGACY_CHECK_FILENAME
+
+        target_check = None
         if check_file.is_file():
-            if not self.sevenzip.test_archive(check_file, password):
+            target_check = check_file
+        elif legacy_check_file.is_file():
+            target_check = legacy_check_file
+
+        if target_check is not None:
+            if not self.sevenzip.test_archive(target_check, password):
                 log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                 return False
+            # Migrate legacy dotfile check to primary check file so Google Drive syncs it across devices
+            if target_check == legacy_check_file and not check_file.exists():
+                try:
+                    shutil.copy2(legacy_check_file, check_file)
+                except Exception:
+                    pass
         else:
             sevenz_files = [
                 f for f in self.root_dir.glob("*.7z")
-                if not f.name.startswith(".") and not f.name.endswith(".bak") and f.name != self.CHECK_FILENAME
+                if not f.name.startswith(".") and not f.name.endswith(".bak") and f.name not in (self.CHECK_FILENAME, self.LEGACY_CHECK_FILENAME)
             ]
             if sevenz_files:
                 first_archive = sevenz_files[0]
                 if not self.sevenzip.test_archive(first_archive, password):
                     log_warning(f"Failed password check on '{self.root_dir.name}'", category="SECURITY")
                     return False
-            else:
+            # Generate primary check archive so subsequent unlocks on cloud drives are instant
+            try:
                 self.sevenzip.create_empty_archive(check_file, password)
+            except Exception:
+                pass
 
         self._password = password
         self.is_unlocked = True
@@ -540,7 +565,7 @@ class Vault:
         self.entry_points.clear()
         found_ep_names = set()
         for file in sorted(self.root_dir.glob("*.7z")):
-            if file.name.startswith(".") or file.name.endswith(".bak") or file.name == self.CHECK_FILENAME:
+            if file.name.startswith(".") or file.name.endswith(".bak") or file.name in (self.CHECK_FILENAME, self.LEGACY_CHECK_FILENAME):
                 continue
 
             ep_name = file.stem
@@ -549,16 +574,8 @@ class Vault:
             self._v2_metadata[ep_name] = meta
 
             # Calculate total size on disk (archive file + chunk files in vaultables-data/{ep_dir_id})
-            size_on_disk = file.stat().st_size
-            ep_data_dir = self.arc_data_dir / meta.ep_dir_id
-            if ep_data_dir.exists():
-                for p in ep_data_dir.rglob("*.7z"):
-                    if is_ignorable_system_file(p) or p.name.startswith("."):
-                        continue
-                    try:
-                        size_on_disk += p.stat().st_size
-                    except Exception:
-                        pass
+            # Uses in-memory metadata packed_size to avoid querying cloud filesystems (Google Drive / OneDrive / Dropbox)
+            size_on_disk = file.stat().st_size + sum(it.packed_size for it in meta.items.values() if not it.is_dir)
 
             item_count = sum(1 for it in meta.items.values() if not it.is_dir and not is_ignorable_system_file(it.name))
             self.entry_points[ep_name] = EntryPoint(

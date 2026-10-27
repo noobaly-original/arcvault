@@ -431,6 +431,11 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Vault folder '{path.name}' does not exist.", 4000)
             return
 
+        # If user selected or passed a file inside the vault, resolve to the enclosing vault root folder
+        if path.is_file():
+            enclosing = Vault.find_enclosing_vault(path)
+            path = enclosing if enclosing else path.parent
+
         if self.vault and self.vault.root_dir.resolve() == path.resolve() and self.vault.is_unlocked:
             return
 
