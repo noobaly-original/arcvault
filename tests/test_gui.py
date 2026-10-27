@@ -1158,6 +1158,87 @@ class TestVaultablesGUI(unittest.TestCase):
 
         win.close()
 
+    def test_pdf_preview_and_image_auto_fit(self) -> None:
+        """Verify PDF preview rendering, navigation, and image auto-fitting."""
+        from vaultables.gui.preview_panel import HAS_PDF
+        from PyQt6.QtGui import QPdfWriter, QPainter, QPageSize
+
+        panel = PreviewPanel()
+
+        # 1. Image auto-fit test
+        img_path = self.root_path / "large_photo.png"
+        from PIL import Image
+        im = Image.new("RGB", (1200, 800), color="blue")
+        im.save(img_path)
+        img_item = ArchiveItem(name="large_photo.png", path="large_photo.png", category=FileCategory.IMAGE)
+
+        panel.image_scroll.resize(400, 300)
+        panel.image_scroll.viewport().resize(380, 280)
+        panel.show_preview(img_item, img_path)
+        self.assertEqual(panel.stack.currentIndex(), 2)
+        self.assertLess(panel._zoom_factor, 1.0)
+
+        factor_before = panel._zoom_factor
+        panel._zoom_in()
+        self.assertGreater(panel._zoom_factor, factor_before)
+        panel._zoom_out()
+        panel._zoom_fit()
+        self.assertLessEqual(panel._zoom_factor, 1.0)
+
+        # 2. PDF preview test
+        if HAS_PDF:
+            pdf_path = self.root_path / "sample_doc.pdf"
+            writer = QPdfWriter(str(pdf_path))
+            writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            painter = QPainter(writer)
+            painter.drawText(50, 50, "Page 1 Content")
+            writer.newPage()
+            painter.drawText(50, 50, "Page 2 Content")
+            writer.newPage()
+            painter.drawText(50, 50, "Page 3 Content")
+            painter.end()
+
+            pdf_item = ArchiveItem(name="sample_doc.pdf", path="sample_doc.pdf", category=FileCategory.DOCUMENT, size=pdf_path.stat().st_size)
+            panel.show_preview(pdf_item, pdf_path)
+            self.assertEqual(panel.stack.currentIndex(), 4)
+            self.assertIn("Page 1 of 3", panel.lbl_pdf_info.text())
+            self.assertFalse(panel.btn_pdf_prev.isEnabled())
+            self.assertTrue(panel.btn_pdf_next.isEnabled())
+
+            # Navigate next
+            panel._pdf_next_page()
+            self.assertIn("Page 2 of 3", panel.lbl_pdf_info.text())
+            self.assertTrue(panel.btn_pdf_prev.isEnabled())
+            self.assertTrue(panel.btn_pdf_next.isEnabled())
+
+            panel._pdf_next_page()
+            self.assertIn("Page 3 of 3", panel.lbl_pdf_info.text())
+            self.assertTrue(panel.btn_pdf_prev.isEnabled())
+            self.assertFalse(panel.btn_pdf_next.isEnabled())
+
+            # Navigate back
+            panel._pdf_prev_page()
+            self.assertIn("Page 2 of 3", panel.lbl_pdf_info.text())
+
+            # Zoom controls
+            cur_zoom = panel.pdf_view.zoomFactor()
+            panel._pdf_zoom_in()
+            self.assertGreater(panel.pdf_view.zoomFactor(), cur_zoom)
+            panel._pdf_zoom_out()
+            panel._pdf_fit_width()
+            panel._pdf_fit_page()
+
+            # Corrupt PDF fallback to card (Page 3)
+            corrupt_pdf = self.root_path / "corrupt.pdf"
+            corrupt_pdf.write_bytes(b"Not a valid PDF file content")
+            corrupt_item = ArchiveItem(name="corrupt.pdf", path="corrupt.pdf", category=FileCategory.DOCUMENT)
+            panel.show_preview(corrupt_item, corrupt_pdf)
+            self.assertEqual(panel.stack.currentIndex(), 3)
+
+            # Reset to empty closes document
+            panel.set_empty()
+            self.assertEqual(panel.stack.currentIndex(), 0)
+
 if __name__ == "__main__":
 
     unittest.main()

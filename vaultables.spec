@@ -25,6 +25,8 @@ a = Analysis(
         "PyQt6.QtCore",
         "PyQt6.QtGui",
         "PyQt6.QtWidgets",
+        "PyQt6.QtPdf",
+        "PyQt6.QtPdfWidgets",
         "pygments",
         "pygments.lexers",
         "pygments.formatters",
@@ -48,7 +50,6 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -88,10 +89,12 @@ if sys.platform == "darwin":
         icon=icon_file,
         bundle_identifier="com.vaultables.desktop",
         info_plist={
-            "CFBundleShortVersionString": "2.1.8",
-            "CFBundleVersion": "2.1.8",
-            "NSHighResolutionCapable": "True",
-            "CFBundleDisplayName": "Vaultables",
             "CFBundleName": "Vaultables",
+            "CFBundleDisplayName": "Vaultables",
+            "CFBundleIdentifier": "com.vaultables.desktop",
+            "CFBundleVersion": "2.2.0",
+            "CFBundleShortVersionString": "2.2.0",
+            "NSHighResolutionCapable": "True",
+            "NSRequiresAquaSystemAppearance": "False",
         },
     )

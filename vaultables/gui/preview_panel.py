@@ -1,4 +1,4 @@
-"""Rich preview panel supporting images, syntax-highlighted code/text, direct in-app editing, and executable file cards."""
+"""Rich preview panel supporting images, PDFs, syntax-highlighted code/text, direct in-app editing, and executable file cards."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QImage, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
@@ -32,6 +32,13 @@ try:
     HAS_PYGMENTS = True
 except ImportError:
     HAS_PYGMENTS = False
+
+try:
+    from PyQt6.QtPdf import QPdfDocument
+    from PyQt6.QtPdfWidgets import QPdfView
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
 
 from vaultables.core.models import ArchiveItem, FileCategory
 from vaultables.gui.icons import IconProvider
@@ -63,6 +70,7 @@ class PreviewPanel(QWidget):
         self.current_item: Optional[ArchiveItem] = None
         self.current_file_path: Optional[Path] = None
         self._zoom_factor: float = 1.0
+        self._auto_fit_image: bool = True
         self._original_pixmap: Optional[QPixmap] = None
         self._is_editing_text: bool = False
         self._original_text_content: str = ""
@@ -134,7 +142,7 @@ class PreviewPanel(QWidget):
 
         self.layout.addWidget(self.header_widget)
 
-        # Stacked pages: 0=Empty, 1=Text, 2=Image, 3=Card
+        # Stacked pages: 0=Empty, 1=Text, 2=Image, 3=Card, 4=PDF
         self.stack = QStackedWidget(self)
 
         # Page 0: Empty
@@ -236,6 +244,73 @@ class PreviewPanel(QWidget):
         card_layout.addStretch()
         self.stack.addWidget(self.page_card)
 
+        # Page 4: PDF Viewer
+        self.page_pdf = QWidget()
+        pdf_layout = QVBoxLayout(self.page_pdf)
+        pdf_layout.setContentsMargins(0, 0, 0, 0)
+        pdf_layout.setSpacing(4)
+
+        pdf_bar = QWidget()
+        pdf_bar_layout = QHBoxLayout(pdf_bar)
+        pdf_bar_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_pdf_info = QLabel("")
+        self.lbl_pdf_info.setStyleSheet("color: #64748b; font-size: 11px;")
+        pdf_bar_layout.addWidget(self.lbl_pdf_info)
+        pdf_bar_layout.addStretch()
+
+        self.btn_pdf_prev = QToolButton()
+        self.btn_pdf_prev.setText("<")
+        self.btn_pdf_prev.setToolTip("Previous Page")
+        self.btn_pdf_prev.clicked.connect(self._pdf_prev_page)
+        pdf_bar_layout.addWidget(self.btn_pdf_prev)
+
+        self.btn_pdf_next = QToolButton()
+        self.btn_pdf_next.setText(">")
+        self.btn_pdf_next.setToolTip("Next Page")
+        self.btn_pdf_next.clicked.connect(self._pdf_next_page)
+        pdf_bar_layout.addWidget(self.btn_pdf_next)
+
+        btn_pdf_zoom_in = QToolButton()
+        btn_pdf_zoom_in.setText("+")
+        btn_pdf_zoom_in.setToolTip("Zoom In")
+        btn_pdf_zoom_in.clicked.connect(self._pdf_zoom_in)
+        pdf_bar_layout.addWidget(btn_pdf_zoom_in)
+
+        btn_pdf_zoom_out = QToolButton()
+        btn_pdf_zoom_out.setText("-")
+        btn_pdf_zoom_out.setToolTip("Zoom Out")
+        btn_pdf_zoom_out.clicked.connect(self._pdf_zoom_out)
+        pdf_bar_layout.addWidget(btn_pdf_zoom_out)
+
+        btn_pdf_fit_w = QToolButton()
+        btn_pdf_fit_w.setText("Fit Width")
+        btn_pdf_fit_w.setToolTip("Fit to Width")
+        btn_pdf_fit_w.clicked.connect(self._pdf_fit_width)
+        pdf_bar_layout.addWidget(btn_pdf_fit_w)
+
+        btn_pdf_fit_p = QToolButton()
+        btn_pdf_fit_p.setText("Fit Page")
+        btn_pdf_fit_p.setToolTip("Fit Page to Window")
+        btn_pdf_fit_p.clicked.connect(self._pdf_fit_page)
+        pdf_bar_layout.addWidget(btn_pdf_fit_p)
+
+        pdf_layout.addWidget(pdf_bar)
+
+        if HAS_PDF:
+            self.pdf_document = QPdfDocument(self)
+            self.pdf_view = QPdfView(self)
+            self.pdf_view.setDocument(self.pdf_document)
+            self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
+            self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+            self.pdf_view.pageNavigator().currentPageChanged.connect(self._on_pdf_page_changed)
+            pdf_layout.addWidget(self.pdf_view)
+        else:
+            self.pdf_document = None
+            self.pdf_view = None
+
+        self.stack.addWidget(self.page_pdf)
+
         self.layout.addWidget(self.stack)
 
         self.set_empty()
@@ -254,6 +329,8 @@ class PreviewPanel(QWidget):
 
     def set_empty(self) -> None:
         """Reset to empty preview state."""
+        if HAS_PDF and hasattr(self, "pdf_document") and self.pdf_document:
+            self.pdf_document.close()
         self.current_item = None
         self.current_file_path = None
         self._original_pixmap = None
@@ -273,6 +350,8 @@ class PreviewPanel(QWidget):
 
     def show_card_only(self, item: ArchiveItem, status_note: str = "") -> None:
         """Display metadata card immediately without requiring an extracted local file."""
+        if HAS_PDF and hasattr(self, "pdf_document") and self.pdf_document:
+            self.pdf_document.close()
         self.current_item = item
         self.current_file_path = None
         self._is_editing_text = False
@@ -315,6 +394,8 @@ class PreviewPanel(QWidget):
 
         if category == FileCategory.IMAGE:
             self._show_image(local_path)
+        elif (item.name.lower().endswith(".pdf") or local_path.suffix.lower() == ".pdf") and HAS_PDF:
+            self._show_pdf(item, local_path)
         elif category in {FileCategory.TEXT, FileCategory.CODE}:
             self._show_text(item, local_path)
         elif category in {FileCategory.DOCUMENT, FileCategory.GENERIC}:
@@ -330,16 +411,20 @@ class PreviewPanel(QWidget):
         self.btn_edit_text.setVisible(False)
         self.btn_save_text.setVisible(False)
         self.btn_cancel_edit.setVisible(False)
+        if HAS_PDF and hasattr(self, "pdf_document") and self.pdf_document:
+            self.pdf_document.close()
+
         pixmap = QPixmap(str(local_path))
         if pixmap.isNull():
             self._show_card(self.current_item)
             return
 
         self._original_pixmap = pixmap
-        self._zoom_factor = 1.0
         self.lbl_img_dim.setText(f"{pixmap.width()} × {pixmap.height()} px • {format_size(local_path.stat().st_size)}")
-        self._update_image_display()
         self.stack.setCurrentIndex(2)
+        # Automatically fit image to canvas viewport
+        self._zoom_fit()
+        QTimer.singleShot(0, self._zoom_fit)
 
     def _update_image_display(self) -> None:
         if not self._original_pixmap:
@@ -353,21 +438,118 @@ class PreviewPanel(QWidget):
         self.lbl_image.setPixmap(scaled)
 
     def _zoom_in(self) -> None:
+        self._auto_fit_image = False
         self._zoom_factor = min(self._zoom_factor * 1.25, 5.0)
         self._update_image_display()
 
     def _zoom_out(self) -> None:
+        self._auto_fit_image = False
         self._zoom_factor = max(self._zoom_factor / 1.25, 0.1)
         self._update_image_display()
 
-    def _zoom_fit(self) -> None:
+    def _zoom_fit(self, preserve_auto_fit: bool = False) -> None:
+        if not preserve_auto_fit:
+            self._auto_fit_image = True
         if not self._original_pixmap or self._original_pixmap.width() == 0 or self._original_pixmap.height() == 0:
             return
         area_size = self.image_scroll.viewport().size()
-        factor_w = (area_size.width() - 20) / self._original_pixmap.width()
-        factor_h = (area_size.height() - 20) / self._original_pixmap.height()
-        self._zoom_factor = min(factor_w, factor_h, 1.0)
+        w = area_size.width() - 20
+        h = area_size.height() - 20
+        if w > 10 and h > 10:
+            factor_w = w / self._original_pixmap.width()
+            factor_h = h / self._original_pixmap.height()
+            self._zoom_factor = max(min(factor_w, factor_h, 1.0), 0.05)
+        else:
+            self._zoom_factor = 1.0
         self._update_image_display()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self.stack.currentIndex() == 2 and getattr(self, "_auto_fit_image", False):
+            self._zoom_fit(preserve_auto_fit=True)
+
+    def _show_pdf(self, item: ArchiveItem, local_path: Path) -> None:
+        self.btn_copy_text.setVisible(False)
+        self.btn_edit_text.setVisible(False)
+        self.btn_save_text.setVisible(False)
+        self.btn_cancel_edit.setVisible(False)
+
+        if not HAS_PDF or self.pdf_document is None or self.pdf_view is None:
+            self._show_card(item)
+            return
+
+        err = self.pdf_document.load(str(local_path.resolve()))
+        if err != QPdfDocument.Error.None_:
+            self._show_card(item, status_note=f"PDF Error: {err.name}")
+            return
+
+        page_count = self.pdf_document.pageCount()
+        if page_count == 0:
+            self._show_card(item, status_note="Empty PDF document")
+            return
+
+        self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self._update_pdf_info()
+        self.stack.setCurrentIndex(4)
+
+    def _pdf_prev_page(self) -> None:
+        if not HAS_PDF or not self.pdf_view or not self.pdf_document:
+            return
+        nav = self.pdf_view.pageNavigator()
+        cur = nav.currentPage()
+        if cur > 0:
+            nav.jump(cur - 1, QPointF(), nav.currentZoom())
+
+    def _pdf_next_page(self) -> None:
+        if not HAS_PDF or not self.pdf_view or not self.pdf_document:
+            return
+        nav = self.pdf_view.pageNavigator()
+        cur = nav.currentPage()
+        total = self.pdf_document.pageCount()
+        if cur + 1 < total:
+            nav.jump(cur + 1, QPointF(), nav.currentZoom())
+
+    def _pdf_zoom_in(self) -> None:
+        if not HAS_PDF or not self.pdf_view:
+            return
+        cur = self.pdf_view.zoomFactor()
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self.pdf_view.setZoomFactor(min(cur * 1.25, 5.0))
+
+    def _pdf_zoom_out(self) -> None:
+        if not HAS_PDF or not self.pdf_view:
+            return
+        cur = self.pdf_view.zoomFactor()
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self.pdf_view.setZoomFactor(max(cur / 1.25, 0.1))
+
+    def _pdf_fit_width(self) -> None:
+        if not HAS_PDF or not self.pdf_view:
+            return
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+
+    def _pdf_fit_page(self) -> None:
+        if not HAS_PDF or not self.pdf_view:
+            return
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitInView)
+
+    def _on_pdf_page_changed(self, page_index: int) -> None:
+        self._update_pdf_info()
+
+    def _update_pdf_info(self) -> None:
+        if not HAS_PDF or not self.pdf_document or not self.pdf_view:
+            return
+        total = self.pdf_document.pageCount()
+        cur = self.pdf_view.pageNavigator().currentPage() + 1 if total > 0 else 0
+        size_str = ""
+        if self.current_file_path and self.current_file_path.exists():
+            size_str = f" • {format_size(self.current_file_path.stat().st_size)}"
+        elif self.current_item and self.current_item.size:
+            size_str = f" • {format_size(self.current_item.size)}"
+        self.lbl_pdf_info.setText(f"Page {cur} of {total}{size_str}")
+        self.btn_pdf_prev.setEnabled(cur > 1)
+        self.btn_pdf_next.setEnabled(cur < total)
 
     def _show_text(self, item: ArchiveItem, local_path: Path) -> None:
         self._is_editing_text = False
@@ -375,6 +557,8 @@ class PreviewPanel(QWidget):
         self.btn_edit_text.setVisible(True)
         self.btn_save_text.setVisible(False)
         self.btn_cancel_edit.setVisible(False)
+        if HAS_PDF and hasattr(self, "pdf_document") and self.pdf_document:
+            self.pdf_document.close()
         self.text_edit.setReadOnly(True)
 
         try:
@@ -461,6 +645,8 @@ class PreviewPanel(QWidget):
         self.btn_edit_text.setVisible(False)
         self.btn_save_text.setVisible(False)
         self.btn_cancel_edit.setVisible(False)
+        if HAS_PDF and hasattr(self, "pdf_document") and self.pdf_document:
+            self.pdf_document.close()
         self.card_icon.setPixmap(
             IconProvider.get_category_pixmap(item.category, dark_mode=self.dark_mode, size=64)
         )
