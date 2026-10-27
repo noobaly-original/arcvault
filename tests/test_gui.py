@@ -1239,6 +1239,100 @@ class TestVaultablesGUI(unittest.TestCase):
             panel.set_empty()
             self.assertEqual(panel.stack.currentIndex(), 0)
 
+    def test_drag_and_drop_validation_disallows_files_and_self(self) -> None:
+        """Verify dragging files onto other files or onto itself is rejected."""
+        import json
+        from PyQt6.QtCore import QMimeData, QPointF
+        from PyQt6.QtGui import QDragMoveEvent, QDropEvent
+
+        view = FileExplorerView()
+        view.set_location_context("docs", "")
+
+        f1 = ArchiveItem(name="file1.txt", path="file1.txt", is_dir=False, entry_point_name="docs")
+        f2 = ArchiveItem(name="file2.txt", path="file2.txt", is_dir=False, entry_point_name="docs")
+        folder1 = ArchiveItem(name="subfolder", path="subfolder", is_dir=True, category=FileCategory.FOLDER, entry_point_name="docs")
+
+        view.set_items([f1, f2, folder1])
+        view.table.resize(400, 300)
+
+        # Simulate internal drag of file1.txt
+        mime = QMimeData()
+        internal_payload = {
+            "source_entry_point": "docs",
+            "items": ["file1.txt"],
+        }
+        mime.setData("application/x-vaultables-internal", json.dumps(internal_payload).encode("utf-8"))
+
+        # 1. Dragging over file1.txt (itself, row 0)
+        row0_rect = view.table.visualRect(view.table.model().index(0, 0))
+        pt_self = QPointF(row0_rect.center())
+        move_ev_self = QDragMoveEvent(
+            pt_self.toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        view.table.dragMoveEvent(move_ev_self)
+        self.assertFalse(move_ev_self.isAccepted(), "Dragging over itself must be ignored")
+        self.assertEqual(len(view.table.selectedIndexes()), 0, "File row must not be selected")
+
+        # 2. Dragging over file2.txt (another file, row 1)
+        row1_rect = view.table.visualRect(view.table.model().index(1, 0))
+        pt_file2 = QPointF(row1_rect.center())
+        move_ev_file2 = QDragMoveEvent(
+            pt_file2.toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        view.table.dragMoveEvent(move_ev_file2)
+        self.assertFalse(move_ev_file2.isAccepted(), "Dragging over another file must be ignored")
+        self.assertEqual(len(view.table.selectedIndexes()), 0, "Target file row must not be selected")
+
+        # Drop on file2.txt should also be ignored
+        drop_ev_file2 = QDropEvent(
+            pt_file2,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move_requests = []
+        view.internal_move_requested.connect(lambda ep, it, tgt: move_requests.append((ep, it, tgt)))
+        view.table.dropEvent(drop_ev_file2)
+        self.assertFalse(drop_ev_file2.isAccepted(), "Drop on file must be ignored")
+        self.assertEqual(len(move_requests), 0, "No internal move should be emitted for file drop")
+
+        # 3. Dragging over subfolder (valid destination folder, row 2)
+        row2_rect = view.table.visualRect(view.table.model().index(2, 0))
+        pt_folder = QPointF(row2_rect.center())
+        move_ev_folder = QDragMoveEvent(
+            pt_folder.toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        view.table.dragMoveEvent(move_ev_folder)
+        self.assertTrue(move_ev_folder.isAccepted(), "Dragging over a valid folder must be accepted")
+        self.assertEqual(view.table.currentRow(), 2, "Target folder row must be selected")
+
+        # Drop on folder is accepted
+        drop_ev_folder = QDropEvent(
+            pt_folder,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        view.table.dropEvent(drop_ev_folder)
+        self.assertTrue(drop_ev_folder.isAccepted(), "Drop on folder must be accepted")
+        self.assertEqual(len(move_requests), 1, "Internal move must be emitted")
+        self.assertEqual(move_requests[0][1], ["file1.txt"])
+        self.assertEqual(move_requests[0][2].path, "subfolder")
+
 if __name__ == "__main__":
 
     unittest.main()

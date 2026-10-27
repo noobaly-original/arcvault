@@ -1022,6 +1022,8 @@ class MainWindow(QMainWindow):
         mime = QMimeData()
         mime.setUrls(extracted_urls)
         internal_payload = {
+            "source_entry_point": ep_name,
+            "items": internal_paths,
             "entry_point": ep_name,
             "paths": internal_paths,
         }

@@ -41,6 +41,42 @@ class FileTableWidget(QTableWidget):
         self.setDragEnabled(True)
         self._drag_start_pos: Optional[QPoint] = None
         self._zoom_delta_accum: float = 0.0
+        self._is_search_mode: bool = False
+        self._current_entry_point: str = ""
+        self._current_subfolder: str = ""
+
+    @property
+    def is_search_mode(self) -> bool:
+        parent = self.parent()
+        if parent and hasattr(parent, "is_search_mode"):
+            return bool(parent.is_search_mode)
+        return self._is_search_mode
+
+    @is_search_mode.setter
+    def is_search_mode(self, val: bool) -> None:
+        self._is_search_mode = bool(val)
+
+    @property
+    def current_entry_point(self) -> str:
+        parent = self.parent()
+        if parent and hasattr(parent, "current_entry_point"):
+            return str(parent.current_entry_point)
+        return self._current_entry_point
+
+    @current_entry_point.setter
+    def current_entry_point(self, val: str) -> None:
+        self._current_entry_point = str(val)
+
+    @property
+    def current_subfolder(self) -> str:
+        parent = self.parent()
+        if parent and hasattr(parent, "current_subfolder"):
+            return str(parent.current_subfolder)
+        return self._current_subfolder
+
+    @current_subfolder.setter
+    def current_subfolder(self, val: str) -> None:
+        self._current_subfolder = str(val)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -72,6 +108,10 @@ class FileTableWidget(QTableWidget):
         if not items:
             return
 
+        if self.receivers(self.drag_export_requested) > 0:
+            self.drag_export_requested.emit(items)
+            return
+
         drag = QDrag(self)
         mime = QMimeData()
 
@@ -80,15 +120,75 @@ class FileTableWidget(QTableWidget):
         internal_data = {
             "source_entry_point": items[0].entry_point_name,
             "items": [it.path for it in items],
+            "entry_point": items[0].entry_point_name,
+            "paths": [it.path for it in items],
         }
         mime.setData("application/x-vaultables-internal", json.dumps(internal_data).encode("utf-8"))
 
         drag.setMimeData(mime)
-        self.drag_export_requested.emit(items)
         drag.exec(Qt.DropAction.CopyAction)
 
+    def _is_valid_drop_target(self, event, target_item: Optional[ArchiveItem]) -> bool:
+        """
+        Validate whether dropping on target_item (or empty canvas) is allowed:
+        - Regular files can NEVER be drop targets (cannot drop files onto other files or onto itself).
+        - A folder cannot be dropped onto itself or into any of its subfolders.
+        - Items cannot be dropped into the folder they already reside in.
+        """
+        # Rule 1: A regular file cannot be a drop target under any circumstance.
+        if target_item is not None and not (target_item.is_dir or target_item.category == FileCategory.ENTRY_POINT):
+            return False
+
+        mime = event.mimeData()
+
+        # Rule 2: Internal drag inside Vaultables
+        if mime.hasFormat("application/x-vaultables-internal"):
+            try:
+                import json
+                raw = bytes(mime.data("application/x-vaultables-internal"))
+                d = json.loads(raw.decode("utf-8"))
+                source_ep = d.get("source_entry_point") or d.get("entry_point") or ""
+                item_paths = [p.strip("/") for p in (d.get("items") or d.get("paths") or [])]
+            except Exception:
+                return False
+
+            if not item_paths:
+                return False
+
+            if target_item is not None:
+                target_path = target_item.path.strip("/")
+
+                # Cannot drop a folder onto itself
+                if target_path in item_paths:
+                    return False
+
+                # Cannot drop a folder into one of its descendants
+                for p in item_paths:
+                    if target_path.startswith(p + "/"):
+                        return False
+
+                # Cannot drop items into the exact folder they are already inside
+                if all("/".join(p.split("/")[:-1]) == target_path for p in item_paths):
+                    return False
+
+                return True
+            else:
+                # Hovering over empty canvas space
+                # If all dragged items are already in current subfolder in the same entry point, it's a no-op
+                if not self.is_search_mode and source_ep == self.current_entry_point:
+                    cur = self.current_subfolder.strip("/")
+                    if all("/".join(p.split("/")[:-1]) == cur for p in item_paths):
+                        return False
+                return True
+
+        # Rule 3: External files from OS (files can be dropped into folders or empty area)
+        if mime.hasUrls():
+            return True
+
+        return False
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-vaultables-internal"):
+        if event.mimeData().hasFormat("application/x-vaultables-internal") or event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -96,14 +196,21 @@ class FileTableWidget(QTableWidget):
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
         pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
         row = self.rowAt(pos.y())
-        if row >= 0:
-            self.selectRow(row)
-        else:
-            self.clearSelection()
 
-        if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-vaultables-internal"):
+        target_item: Optional[ArchiveItem] = None
+        if row >= 0:
+            item_widget = self.item(row, 0)
+            if item_widget:
+                target_item = item_widget.data(Qt.ItemDataRole.UserRole)
+
+        if self._is_valid_drop_target(event, target_item):
+            if row >= 0 and target_item:
+                self.selectRow(row)
+            else:
+                self.clearSelection()
             event.acceptProposedAction()
         else:
+            self.clearSelection()
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
@@ -116,20 +223,29 @@ class FileTableWidget(QTableWidget):
             if item_widget:
                 target_item = item_widget.data(Qt.ItemDataRole.UserRole)
 
+        if not self._is_valid_drop_target(event, target_item):
+            self.clearSelection()
+            event.ignore()
+            return
+
         # 1. Handle Internal Drag & Move
         if event.mimeData().hasFormat("application/x-vaultables-internal"):
             try:
                 import json
                 raw_bytes = bytes(event.mimeData().data("application/x-vaultables-internal"))
                 data = json.loads(raw_bytes.decode("utf-8"))
-                source_ep = data.get("source_entry_point", "")
-                item_paths = data.get("items", [])
+                source_ep = data.get("source_entry_point") or data.get("entry_point") or ""
+                item_paths = data.get("items") or data.get("paths") or []
                 if item_paths:
                     self.internal_move_requested.emit(source_ep, item_paths, target_item)
+                    self.clearSelection()
                     event.acceptProposedAction()
                     return
             except Exception as e:
                 print(f"[Vaultables] Failed to process internal drop: {e}")
+            self.clearSelection()
+            event.ignore()
+            return
 
         # 2. Handle External Files Drop from OS
         urls = event.mimeData().urls()
@@ -140,9 +256,11 @@ class FileTableWidget(QTableWidget):
             ]
             if file_paths:
                 self.files_dropped_on_item.emit(file_paths, target_item)
+                self.clearSelection()
                 event.acceptProposedAction()
                 return
 
+        self.clearSelection()
         event.ignore()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -615,11 +733,14 @@ class FileExplorerView(QWidget):
             return
 
         # Inside an entry point archive
-        if target_item and target_item.is_dir:
+        if target_item and (target_item.is_dir or target_item.category == FileCategory.ENTRY_POINT):
             target_sub = target_item.path.strip("/")
             self.files_dropped_on_folder.emit(files, target_sub)
-        else:
+        elif target_item is None:
             self.files_dropped_on_folder.emit(files, self.current_subfolder)
+        else:
+            # Dropping onto a regular file is disallowed
+            return
 
     def _show_context_menu(self, pos) -> None:
         menu = QMenu(self)
